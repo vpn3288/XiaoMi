@@ -10,18 +10,47 @@ TEST_URL="${SIDEGW_TEST_URL:-http://connect.rom.miui.com/generate_204}"
 TABLE="${SIDEGW_TABLE:-100}"
 LAN_IF="${SIDEGW_LAN_IF:-br-lan}"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
+LOCK_PID="$LOCK_DIR/pid"
 LOCK_HELD="${SIDEGW_LOCK_HELD:-0}"
 
 release_lock() {
-    [ "$LOCK_HELD" = "1" ] || rmdir "$LOCK_DIR" 2>/dev/null || true
+    [ "$LOCK_HELD" = "1" ] && return
+    lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
+    [ "$lock_pid" = "$$" ] || return
+    rm -f "$LOCK_PID"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+take_lock() {
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+            trap 'release_lock' EXIT INT TERM
+            return 0
+        fi
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
+    if [ -z "$lock_pid" ] || ! echo "$lock_pid" | grep -Eq '^[0-9]+$' || ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -f "$LOCK_PID"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+                trap 'release_lock' EXIT INT TERM
+                return 0
+            fi
+            rmdir "$LOCK_DIR" 2>/dev/null || true
+        fi
+    fi
+    return 1
 }
 
 if [ "$LOCK_HELD" != "1" ]; then
-    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if ! take_lock; then
         echo "sidegw is busy; another apply/test/rollback is running"
         exit 3
     fi
-    trap 'release_lock' EXIT INT TERM
 fi
 
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"

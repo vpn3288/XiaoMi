@@ -16,6 +16,7 @@ MARK_DIRECT="0x65"
 RULE_STATE="$BASE/rules.state"
 NEW_RULE_STATE="/tmp/sidegw-rules.$$"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
+LOCK_PID="$LOCK_DIR/pid"
 LOCK_HELD="${SIDEGW_LOCK_HELD:-0}"
 APPLY_FAILED=0
 SIDE_IP_COUNT=0
@@ -51,15 +52,43 @@ log() {
 }
 
 release_lock() {
-    [ "$LOCK_HELD" = "1" ] || rmdir "$LOCK_DIR" 2>/dev/null || true
+    [ "$LOCK_HELD" = "1" ] && return
+    lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
+    [ "$lock_pid" = "$$" ] || return
+    rm -f "$LOCK_PID"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+take_lock() {
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+            trap 'release_lock' EXIT INT TERM
+            return 0
+        fi
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
+    if [ -z "$lock_pid" ] || ! echo "$lock_pid" | grep -Eq '^[0-9]+$' || ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -f "$LOCK_PID"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+                trap 'release_lock' EXIT INT TERM
+                return 0
+            fi
+            rmdir "$LOCK_DIR" 2>/dev/null || true
+        fi
+    fi
+    return 1
 }
 
 if [ "$LOCK_HELD" != "1" ]; then
-    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if ! take_lock; then
         log "sidegw is busy; another apply/test/rollback is running"
         exit 3
     fi
-    trap 'release_lock' EXIT INT TERM
 fi
 
 fail_apply() {
@@ -93,24 +122,22 @@ rule_del_recorded_file() {
 }
 
 rule_del_matching_sidegw() {
-    ip rule show 2>/dev/null | while IFS= read -r line; do
-        pref="${line%%:*}"
-        case "$pref" in
-            ''|*[!0-9]*) continue ;;
-        esac
-        case "$line" in
-            *"fwmark 0x64"*"lookup $TABLE"*|*"fwmark 0x65"*"lookup main"*)
-                while ip rule del pref "$pref" 2>/dev/null; do :; done
-                ;;
-            *"lookup $TABLE"*)
-                case "$pref" in
-                    101[1-9][0-9]|102[0-2][0-9])
-                        while ip rule del pref "$pref" 2>/dev/null; do :; done
-                        ;;
-                esac
-                ;;
-        esac
+    while ip rule del fwmark "$MARK_DIRECT" lookup main 2>/dev/null; do :; done
+    while ip rule del fwmark "$MARK_SIDE" table "$TABLE" 2>/dev/null; do :; done
+
+    for ipaddr in $DIRECT_IPS $GATEWAY; do
+        valid_ip "$ipaddr" || continue
+        while ip rule del from "$ipaddr/32" lookup main 2>/dev/null; do :; done
     done
+
+    for ipaddr in $SIDE_IPS; do
+        valid_ip "$ipaddr" || continue
+        while ip rule del from "$ipaddr/32" table "$TABLE" 2>/dev/null; do :; done
+    done
+
+    if [ "$MODE" = "all" ] && valid_cidr "$LAN_CIDR"; then
+        while ip rule del from "$LAN_CIDR" table "$TABLE" 2>/dev/null; do :; done
+    fi
 }
 
 ip_rules_cleanup() {

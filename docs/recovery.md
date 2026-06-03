@@ -16,6 +16,8 @@ http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 一键关闭
 ```
 
+面板会先要求输入管理口令。一键关闭会保留上一次已验证配置 `config.last_good`。
+
 ## 方法二：SSH 关闭
 
 ```sh
@@ -25,6 +27,8 @@ http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 ## 方法三：手动清理
 
 ```sh
+RULE_STATE=/mnt/usb-d965c2b9/xiaomi_router/toolbox/panel/modules/sidegw/rules.state
+
 while iptables -t mangle -D PREROUTING -i br-lan -j SIDEGW 2>/dev/null; do :; done
 while iptables -D FORWARD -i br-lan -o br-lan -j SIDEGW_FWD 2>/dev/null; do :; done
 while iptables -t nat -D PREROUTING -i br-lan -j SIDEGW_DNS 2>/dev/null; do :; done
@@ -39,11 +43,13 @@ iptables -t nat -X SIDEGW_DNS 2>/dev/null
 iptables -t nat -F SIDEGW_DNS_POST 2>/dev/null
 iptables -t nat -X SIDEGW_DNS_POST 2>/dev/null
 
-i=10000
-while [ "$i" -le 10299 ]; do
-  while ip rule del pref "$i" 2>/dev/null; do :; done
-  i=$((i + 1))
-done
+[ -f "$RULE_STATE" ] && while IFS= read -r rule_args; do
+  [ -n "$rule_args" ] || continue
+  while ip rule del $rule_args 2>/dev/null; do :; done
+done < "$RULE_STATE"
+
+while ip rule del fwmark 0x65 lookup main 2>/dev/null; do :; done
+while ip rule del fwmark 0x64 table 100 2>/dev/null; do :; done
 
 ip route flush table 100 2>/dev/null
 ```

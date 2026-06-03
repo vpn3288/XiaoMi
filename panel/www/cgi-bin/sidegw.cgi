@@ -158,6 +158,7 @@ write_config() {
 MSG=""
 ACTION=""
 POST_DATA=""
+VIEW_AUTH=0
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
 
@@ -172,6 +173,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     elif ! authorized "$(param admin_token)"; then
         MSG="管理口令不正确，已拒绝本次操作。"
     else
+        VIEW_AUTH=1
         ENABLED="$(param enabled)"
         [ "$ENABLED" = "1" ] || ENABLED="0"
         MODE="$(param mode)"
@@ -237,6 +239,27 @@ EOF
     exit 0
 fi
 
+MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
+TOKEN_HINT_SAFE="$(printf '%s' "$ADMIN_TOKEN_FILE" | html_escape)"
+if [ "$VIEW_AUTH" != "1" ]; then
+    cat <<EOF
+Content-Type: text/html; charset=utf-8
+
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sidegw 指定 IP 分流</title><link rel="stylesheet" href="/assets/style.css"></head>
+<body>
+<aside><div class="brand">小米路由工具箱</div><nav><a class="active" href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside>
+<main>
+<section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><form method="post" action="/cgi-bin/sidegw.cgi"><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"><div class="actions"><button name="action" value="view">查看当前配置</button></div></form></section>
+<section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
+</main>
+</body>
+</html>
+EOF
+    exit 0
+fi
+
 . "$CONF"
 ENABLED="${ENABLED:-0}"
 MODE="${MODE:-list}"
@@ -258,12 +281,10 @@ RULES="$(ip rule 2>/dev/null | grep -E 'lookup 100|fwmark 0x64|fwmark 0x65' | ht
 ROUTES="$(ip route show table 100 2>/dev/null | html_escape)"
 FWD="$(iptables -vnL SIDEGW_FWD 2>/dev/null | html_escape)"
 DNS="$(iptables -t nat -vnL SIDEGW_DNS 2>/dev/null | html_escape)"
-MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
 ROUTER_IP_SAFE="$(printf '%s' "$ROUTER_IP" | html_escape)"
 CURRENT_IP_SAFE="$(printf '%s' "$CURRENT_IP" | html_escape)"
 GATEWAY_SAFE="$(printf '%s' "$GATEWAY" | html_escape)"
 LAN_CIDR_SAFE="$(printf '%s' "$LAN_CIDR" | html_escape)"
-TOKEN_HINT_SAFE="$(printf '%s' "$ADMIN_TOKEN_FILE" | html_escape)"
 PENDING_STATUS="无待确认配置"
 now="$(date +%s 2>/dev/null || echo 0)"
 pending_until="$(cat "$PENDING_UNTIL" 2>/dev/null || echo 0)"
