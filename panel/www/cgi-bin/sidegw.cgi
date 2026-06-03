@@ -152,6 +152,10 @@ ROUTES="$(ip route show table 100 2>/dev/null | html_escape)"
 FWD="$(iptables -vnL SIDEGW_FWD 2>/dev/null | html_escape)"
 DNS="$(iptables -t nat -vnL SIDEGW_DNS 2>/dev/null | html_escape)"
 MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
+ROUTER_IP_SAFE="$(printf '%s' "$ROUTER_IP" | html_escape)"
+CURRENT_IP_SAFE="$(printf '%s' "$CURRENT_IP" | html_escape)"
+GATEWAY_SAFE="$(printf '%s' "$GATEWAY" | html_escape)"
+LAN_CIDR_SAFE="$(printf '%s' "$LAN_CIDR" | html_escape)"
 
 checked=""
 [ "$ENABLED" = "1" ] && checked="checked"
@@ -173,9 +177,9 @@ Content-Type: text/html; charset=utf-8
 <body>
 <aside><div class="brand">小米路由工具箱</div><nav><a class="active" href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside>
 <main>
-<section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
+<section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP_SAFE</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP_SAFE</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY_SAFE</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
 <form method="post" action="/cgi-bin/sidegw.cgi">
-<section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div></section>
+<section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div></section>
 <section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
 </form>
 <section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
