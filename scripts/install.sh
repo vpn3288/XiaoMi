@@ -143,11 +143,21 @@ pending_until="\$(cat "\$PENDING_UNTIL" 2>/dev/null || echo 0)"
 
 if echo "\$pending_until" | grep -Eq '^[0-9]+$' && [ -f "\$PENDING_GOOD" ] && [ "\$now" -le "\$pending_until" ]; then
     SIDEGW_CONFIG="\$PENDING_GOOD" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+elif [ -f "\$PENDING_GOOD" ] || [ -f "\$PENDING_UNTIL" ]; then
+    if [ -f "\$SIDEGW_BASE/config.last_good" ]; then
+        cp "\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/config" 2>/dev/null || true
+        if SIDEGW_CONFIG="\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1; then
+            rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
+        fi
+    elif [ -x "\$SIDEGW_BASE/apply.sh" ]; then
+        cp "\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/config" 2>/dev/null || true
+        if SIDEGW_CONFIG="\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1; then
+            rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
+        fi
+    fi
 elif [ -f "\$SIDEGW_BASE/config.last_good" ]; then
-    rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
     SIDEGW_CONFIG="\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 elif [ -x "\$SIDEGW_BASE/apply.sh" ]; then
-    rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
     SIDEGW_CONFIG="\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 fi
 
@@ -173,11 +183,13 @@ if [ -f "$keep_sidegw_last_good" ]; then
 fi
 if [ -f "$keep_admin_token" ]; then
     mv "$keep_admin_token" "$INSTALL_DIR/panel/modules/sidegw/admin.token"
+    chmod 600 "$INSTALL_DIR/panel/modules/sidegw/admin.token" 2>/dev/null || true
 fi
 if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
     old_umask="$(umask)"
     umask 077
     generate_admin_token > "$INSTALL_DIR/panel/modules/sidegw/admin.token" || die "cannot write admin token"
+    chmod 600 "$INSTALL_DIR/panel/modules/sidegw/admin.token" 2>/dev/null || true
     umask "$old_umask"
 fi
 

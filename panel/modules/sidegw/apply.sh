@@ -13,6 +13,10 @@ PREF_START=10000
 PREF_END=10299
 MARK_SIDE="0x64"
 MARK_DIRECT="0x65"
+RULE_STATE="$BASE/rules.state"
+NEW_RULE_STATE="/tmp/sidegw-rules.$$"
+LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
+LOCK_HELD="${SIDEGW_LOCK_HELD:-0}"
 APPLY_FAILED=0
 SIDE_IP_COUNT=0
 DIRECT_MAC_COUNT=0
@@ -46,6 +50,18 @@ log() {
     echo "$1"
 }
 
+release_lock() {
+    [ "$LOCK_HELD" = "1" ] || rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+if [ "$LOCK_HELD" != "1" ]; then
+    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+        log "sidegw is busy; another apply/test/rollback is running"
+        exit 3
+    fi
+    trap 'release_lock' EXIT INT TERM
+fi
+
 fail_apply() {
     logger -t sidegw "$1" 2>/dev/null || true
     printf '%s\n' "$1" >&2
@@ -55,6 +71,8 @@ fail_apply() {
 ip_rule_add_must() {
     if ! ip rule add "$@" 2>/tmp/sidegw-ip-rule.err; then
         fail_apply "ip rule add failed: $* $(cat /tmp/sidegw-ip-rule.err 2>/dev/null)"
+    else
+        printf '%s\n' "$*" >> "$NEW_RULE_STATE"
     fi
 }
 
@@ -64,27 +82,75 @@ iptables_must() {
     fi
 }
 
-rule_del_pref() {
-    pref="$1"
-    while ip rule del pref "$pref" 2>/dev/null; do :; done
+rule_del_recorded_file() {
+    file="$1"
+    [ -f "$file" ] || return 0
+    while IFS= read -r rule_args; do
+        [ -n "$rule_args" ] || continue
+        set -- $rule_args
+        while ip rule del "$@" 2>/dev/null; do :; done
+    done < "$file"
+}
+
+rule_del_matching_sidegw() {
+    ip rule show 2>/dev/null | while IFS= read -r line; do
+        pref="${line%%:*}"
+        case "$pref" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        case "$line" in
+            *"fwmark 0x64"*"lookup $TABLE"*|*"fwmark 0x65"*"lookup main"*)
+                while ip rule del pref "$pref" 2>/dev/null; do :; done
+                ;;
+            *"lookup $TABLE"*)
+                case "$pref" in
+                    101[1-9][0-9]|102[0-2][0-9])
+                        while ip rule del pref "$pref" 2>/dev/null; do :; done
+                        ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+ip_rules_cleanup() {
+    rule_del_recorded_file "$RULE_STATE"
+    rule_del_recorded_file "$NEW_RULE_STATE"
+    rule_del_matching_sidegw
 }
 
 iptables_cleanup() {
+    cleanup_failed=0
     while iptables -t mangle -D PREROUTING -i "$LAN_IF" -j "$CHAIN" 2>/dev/null; do :; done
-    iptables -t mangle -F "$CHAIN" 2>/dev/null || true
-    iptables -t mangle -X "$CHAIN" 2>/dev/null || true
+    if iptables -t mangle -L "$CHAIN" >/dev/null 2>&1; then
+        iptables -t mangle -F "$CHAIN" 2>/dev/null || cleanup_failed=1
+        iptables -t mangle -X "$CHAIN" 2>/dev/null || cleanup_failed=1
+    fi
 
     while iptables -D FORWARD -i "$LAN_IF" -o "$LAN_IF" -j "$FWD_CHAIN" 2>/dev/null; do :; done
-    iptables -F "$FWD_CHAIN" 2>/dev/null || true
-    iptables -X "$FWD_CHAIN" 2>/dev/null || true
+    if iptables -L "$FWD_CHAIN" >/dev/null 2>&1; then
+        iptables -F "$FWD_CHAIN" 2>/dev/null || cleanup_failed=1
+        iptables -X "$FWD_CHAIN" 2>/dev/null || cleanup_failed=1
+    fi
 
     while iptables -t nat -D PREROUTING -i "$LAN_IF" -j "$DNS_CHAIN" 2>/dev/null; do :; done
-    iptables -t nat -F "$DNS_CHAIN" 2>/dev/null || true
-    iptables -t nat -X "$DNS_CHAIN" 2>/dev/null || true
+    if iptables -t nat -L "$DNS_CHAIN" >/dev/null 2>&1; then
+        iptables -t nat -F "$DNS_CHAIN" 2>/dev/null || cleanup_failed=1
+        iptables -t nat -X "$DNS_CHAIN" 2>/dev/null || cleanup_failed=1
+    fi
 
     while iptables -t nat -D POSTROUTING -o "$LAN_IF" -j "$DNS_POST_CHAIN" 2>/dev/null; do :; done
-    iptables -t nat -F "$DNS_POST_CHAIN" 2>/dev/null || true
-    iptables -t nat -X "$DNS_POST_CHAIN" 2>/dev/null || true
+    if iptables -t nat -L "$DNS_POST_CHAIN" >/dev/null 2>&1; then
+        iptables -t nat -F "$DNS_POST_CHAIN" 2>/dev/null || cleanup_failed=1
+        iptables -t nat -X "$DNS_POST_CHAIN" 2>/dev/null || cleanup_failed=1
+    fi
+
+    iptables -t mangle -C PREROUTING -i "$LAN_IF" -j "$CHAIN" >/dev/null 2>&1 && cleanup_failed=1
+    iptables -C FORWARD -i "$LAN_IF" -o "$LAN_IF" -j "$FWD_CHAIN" >/dev/null 2>&1 && cleanup_failed=1
+    iptables -t nat -C PREROUTING -i "$LAN_IF" -j "$DNS_CHAIN" >/dev/null 2>&1 && cleanup_failed=1
+    iptables -t nat -C POSTROUTING -o "$LAN_IF" -j "$DNS_POST_CHAIN" >/dev/null 2>&1 && cleanup_failed=1
+
+    [ "$cleanup_failed" = "0" ]
 }
 
 sysctl_tune() {
@@ -244,6 +310,12 @@ add_dns_rules() {
     fi
 }
 
+command -v ip >/dev/null 2>&1 || { log "missing command: ip"; exit 1; }
+command -v iptables >/dev/null 2>&1 || { log "missing command: iptables"; exit 1; }
+
+rm -f "$NEW_RULE_STATE"
+: > "$NEW_RULE_STATE"
+
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 . "$CONF"
 
@@ -268,17 +340,16 @@ if [ "$ENABLED" = "1" ]; then
     }
 fi
 
-i="$PREF_START"
-while [ "$i" -le "$PREF_END" ]; do
-    rule_del_pref "$i"
-    i=$((i + 1))
-done
-
+ip_rules_cleanup
 ip route flush table "$TABLE" 2>/dev/null || true
-iptables_cleanup
+if ! iptables_cleanup; then
+    log "failed to clean existing sidegw iptables rules"
+    exit 2
+fi
 sysctl_tune
 
 if [ "$ENABLED" != "1" ]; then
+    rm -f "$RULE_STATE" "$NEW_RULE_STATE"
     ip route flush cache 2>/dev/null || true
     log "disabled"
     exit 0
@@ -303,16 +374,14 @@ fi
 
 if [ "$APPLY_FAILED" != "0" ]; then
     log "apply failed; cleaning partial sidegw rules"
-    i="$PREF_START"
-    while [ "$i" -le "$PREF_END" ]; do
-        rule_del_pref "$i"
-        i=$((i + 1))
-    done
+    ip_rules_cleanup
     ip route flush table "$TABLE" 2>/dev/null || true
-    iptables_cleanup
+    iptables_cleanup || true
     ip route flush cache 2>/dev/null || true
+    rm -f "$NEW_RULE_STATE"
     exit 2
 fi
 
+mv "$NEW_RULE_STATE" "$RULE_STATE"
 ip route flush cache 2>/dev/null || true
 log "enabled mode=$MODE gateway=$GATEWAY side_ips=$SIDE_IP_COUNT side_macs=$SIDE_MAC_COUNT direct_macs=$DIRECT_MAC_COUNT fwd_rules=$FWD_RULE_COUNT dns_rules=$DNS_RULE_COUNT"

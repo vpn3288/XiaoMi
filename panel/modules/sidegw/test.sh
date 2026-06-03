@@ -9,8 +9,23 @@ TEST_DOMAIN="${SIDEGW_TEST_DOMAIN:-www.google.com}"
 TEST_URL="${SIDEGW_TEST_URL:-http://connect.rom.miui.com/generate_204}"
 TABLE="${SIDEGW_TABLE:-100}"
 LAN_IF="${SIDEGW_LAN_IF:-br-lan}"
+LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
+LOCK_HELD="${SIDEGW_LOCK_HELD:-0}"
+
+release_lock() {
+    [ "$LOCK_HELD" = "1" ] || rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+if [ "$LOCK_HELD" != "1" ]; then
+    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+        echo "sidegw is busy; another apply/test/rollback is running"
+        exit 3
+    fi
+    trap 'release_lock' EXIT INT TERM
+fi
 
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
 
 disable_candidate() {
     tmp="$CONF.tmp.$$"
@@ -27,19 +42,30 @@ MODE="${MODE:-list}"
 SIDE_IPS="${SIDE_IPS:-}"
 
 if [ "$ENABLED" != "1" ]; then
-    "$BASE/rollback.sh" >/dev/null 2>&1 || true
+    if ! SIDEGW_LOCK_HELD=1 "$BASE/apply.sh"; then
+        echo "disabled cleanup failed"
+        exit 1
+    fi
     echo "disabled"
     exit 0
 fi
 
 if [ "$MODE" = "all" ]; then
     disable_candidate
+    if ! SIDEGW_LOCK_HELD=1 "$BASE/apply.sh"; then
+        echo "precheck rejected; cleanup failed"
+        exit 1
+    fi
     echo "precheck rejected; all-LAN mode requires a future confirmation workflow"
     exit 2
 fi
 
 if [ -z "$SIDE_IPS" ]; then
     disable_candidate
+    if ! SIDEGW_LOCK_HELD=1 "$BASE/apply.sh"; then
+        echo "precheck rejected; cleanup failed"
+        exit 1
+    fi
     echo "precheck rejected; at least one side IP is required for automatic verification"
     exit 2
 fi
@@ -52,13 +78,15 @@ else
 fi
 
 rollback() {
+    rollback_failed=0
     cp "$rollback_conf" "$CONF"
     if [ -f "$LAST_GOOD" ]; then
-        SIDEGW_CONFIG="$LAST_GOOD" "$BASE/apply.sh" >/dev/null 2>&1 || true
+        SIDEGW_LOCK_HELD=1 SIDEGW_CONFIG="$LAST_GOOD" "$BASE/apply.sh" >/dev/null 2>&1 || rollback_failed=1
     else
-        "$BASE/apply.sh" >/dev/null 2>&1 || true
+        SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" >/dev/null 2>&1 || rollback_failed=1
     fi
     rm -f "$rollback_conf" "$PENDING_GOOD" "$PENDING_UNTIL"
+    [ "$rollback_failed" = "0" ]
 }
 
 chain_has_parts() {
@@ -76,9 +104,12 @@ chain_has_parts() {
     [ -n "$lines" ]
 }
 
-if ! "$BASE/apply.sh"; then
-    rollback
-    echo "apply failed; rolled back"
+if ! SIDEGW_LOCK_HELD=1 "$BASE/apply.sh"; then
+    if rollback; then
+        echo "apply failed; rolled back"
+    else
+        echo "apply failed; rollback also failed"
+    fi
     exit 1
 fi
 
@@ -123,8 +154,11 @@ else
 fi
 
 if [ "$dns_ok" != "1" ] || [ "$gateway_ok" != "1" ] || [ "$route_ok" != "1" ] || [ "$rules_ok" != "1" ] || [ "$url_ok" != "1" ]; then
-    rollback
-    echo "precheck failed; rolled back"
+    if rollback; then
+        echo "precheck failed; rolled back"
+    else
+        echo "precheck failed; rollback also failed"
+    fi
     echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok rules_ok=$rules_ok url_ok=$url_ok"
     cat /tmp/sidegw-test-dns.log 2>/dev/null || true
     cat /tmp/sidegw-test-gateway.log 2>/dev/null || true
@@ -146,12 +180,18 @@ rm -f "$rollback_conf"
     pending_until="$(cat "$PENDING_UNTIL" 2>/dev/null || echo 0)"
     now="$(date +%s 2>/dev/null || echo 0)"
     if echo "$pending_until" | grep -Eq '^[0-9]+$' && [ -f "$PENDING_GOOD" ] && [ "$now" -ge "$pending_until" ]; then
+        rollback_ok=0
         if [ -f "$LAST_GOOD" ]; then
-            SIDEGW_CONFIG="$LAST_GOOD" "$BASE/apply.sh" >/dev/null 2>&1 || true
+            cp "$LAST_GOOD" "$CONF"
+            SIDEGW_CONFIG="$LAST_GOOD" "$BASE/apply.sh" >/dev/null 2>&1 && rollback_ok=1
         else
-            "$BASE/rollback.sh" >/dev/null 2>&1 || true
+            "$BASE/rollback.sh" >/dev/null 2>&1 && rollback_ok=1
         fi
-        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+        if [ "$rollback_ok" = "1" ]; then
+            rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+        else
+            logger -t sidegw "pending confirmation expired but automatic rollback failed" 2>/dev/null || true
+        fi
     fi
 ) >/dev/null 2>&1 &
 

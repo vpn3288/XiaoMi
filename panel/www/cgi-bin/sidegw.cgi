@@ -22,9 +22,18 @@ admin_token() {
         old_umask="$(umask)"
         umask 077
         generate_admin_token > "$ADMIN_TOKEN_FILE"
+        chmod 600 "$ADMIN_TOKEN_FILE" 2>/dev/null || true
         umask "$old_umask"
     fi
     cat "$ADMIN_TOKEN_FILE" 2>/dev/null
+}
+
+authorized() {
+    posted="$1"
+    server="$(admin_token)"
+    [ -n "$server" ] || return 1
+    [ -n "$posted" ] || return 1
+    [ "$posted" = "$server" ]
 }
 
 hex_value() {
@@ -148,16 +157,19 @@ write_config() {
 
 MSG=""
 ACTION=""
+POST_DATA=""
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
     POST_LEN="${CONTENT_LENGTH:-0}"
     echo "$POST_LEN" | grep -Eq '^[0-9]{1,5}$' || POST_LEN=0
     [ "$POST_LEN" -le 32768 ] || POST_LEN=32768
-    POST_DATA=""
     [ "$POST_LEN" -gt 0 ] && POST_DATA="$(dd bs=1 count="$POST_LEN" 2>/dev/null)"
     ACTION="$(param action)"
-    if [ "$(param admin_token)" != "$(admin_token)" ]; then
+    if [ "$QUERY_ACTION" = "diagnose" ]; then
+        :
+    elif ! authorized "$(param admin_token)"; then
         MSG="管理口令不正确，已拒绝本次操作。"
     else
         ENABLED="$(param enabled)"
@@ -206,14 +218,22 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     fi
 fi
 
-QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
 if [ "$QUERY_ACTION" = "diagnose" ]; then
-    DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
-    cat <<EOF
+    TOKEN_HINT_SAFE="$(printf '%s' "$ADMIN_TOKEN_FILE" | html_escape)"
+    if [ "$REQUEST_METHOD" = "POST" ] && authorized "$(param admin_token)"; then
+        DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
+        cat <<EOF
 Content-Type: text/html; charset=utf-8
 
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>诊断</title><link rel="stylesheet" href="/assets/style.css"></head><body><aside><div class="brand">小米路由工具箱</div><nav><a href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a class="active" href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside><main><section class="card"><h1>诊断输出</h1><pre>$DIAG</pre></section></main></body></html>
 EOF
+    else
+        cat <<EOF
+Content-Type: text/html; charset=utf-8
+
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>诊断</title><link rel="stylesheet" href="/assets/style.css"></head><body><aside><div class="brand">小米路由工具箱</div><nav><a href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a class="active" href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside><main><section class="card"><h1>诊断</h1><form method="post" action="/cgi-bin/sidegw.cgi?action=diagnose"><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"><div class="actions"><button name="action" value="diagnose">查看诊断</button></div></form></section></main></body></html>
+EOF
+    fi
     exit 0
 fi
 

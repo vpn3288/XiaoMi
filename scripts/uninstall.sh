@@ -49,7 +49,7 @@ if [ "$KEEP_CONFIG" = "1" ]; then
 fi
 
 if [ -x "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" ]; then
-    "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" || true
+    "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" || die "rollback failed; abort uninstall to keep recovery tools installed"
 fi
 
 kill_toolbox_uhttpd
