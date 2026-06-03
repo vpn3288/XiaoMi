@@ -1,6 +1,7 @@
 panel/modules/sidegw/admin.token
 panel/modules/sidegw/config
 panel/modules/sidegw/config.last_good
+panel/modules/sidegw/config.applied
 panel/modules/sidegw/config.pending_good
 panel/modules/sidegw/config.pending_until
 panel/modules/sidegw/rules.state

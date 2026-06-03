@@ -14,9 +14,11 @@ PREF_END=10299
 MARK_SIDE="0x64"
 MARK_DIRECT="0x65"
 RULE_STATE="$BASE/rules.state"
+APPLIED_CONFIG="$BASE/config.applied"
 NEW_RULE_STATE="/tmp/sidegw-rules.$$"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
 LOCK_PID="$LOCK_DIR/pid"
+LOCK_STALE_AFTER="${SIDEGW_LOCK_STALE_AFTER:-300}"
 LOCK_HELD="${SIDEGW_LOCK_HELD:-0}"
 APPLY_FAILED=0
 SIDE_IP_COUNT=0
@@ -70,7 +72,21 @@ take_lock() {
     fi
 
     lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
-    if [ -z "$lock_pid" ] || ! echo "$lock_pid" | grep -Eq '^[0-9]+$' || ! kill -0 "$lock_pid" 2>/dev/null; then
+    reclaim_lock=0
+    if echo "$lock_pid" | grep -Eq '^[0-9]+$'; then
+        kill -0 "$lock_pid" 2>/dev/null || reclaim_lock=1
+    else
+        now="$(date +%s 2>/dev/null || echo 0)"
+        lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+        if echo "$now" "$lock_mtime" "$LOCK_STALE_AFTER" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$' &&
+            [ "$now" -gt 0 ] &&
+            [ "$lock_mtime" -gt 0 ] &&
+            [ $((now - lock_mtime)) -ge "$LOCK_STALE_AFTER" ]; then
+            reclaim_lock=1
+        fi
+    fi
+
+    if [ "$reclaim_lock" = "1" ]; then
         rm -f "$LOCK_PID"
         rmdir "$LOCK_DIR" 2>/dev/null || true
         if mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -140,9 +156,26 @@ rule_del_matching_sidegw() {
     fi
 }
 
+rule_del_matching_sidegw_file() {
+    file="$1"
+    [ -f "$file" ] || return 0
+    (
+        ENABLED=0
+        MODE=list
+        GATEWAY=
+        LAN_CIDR=192.168.31.0/24
+        SIDE_IPS=
+        DIRECT_IPS=
+        . "$file" 2>/dev/null || exit 0
+        [ "$MODE" = "all" ] || MODE="list"
+        rule_del_matching_sidegw
+    )
+}
+
 ip_rules_cleanup() {
     rule_del_recorded_file "$RULE_STATE"
     rule_del_recorded_file "$NEW_RULE_STATE"
+    rule_del_matching_sidegw_file "$APPLIED_CONFIG"
     rule_del_matching_sidegw
 }
 
@@ -277,6 +310,11 @@ add_forward_rules() {
         FWD_RULE_COUNT=$((FWD_RULE_COUNT + 1))
     done
 
+    if [ "$SIDE_MAC_COUNT" -gt 0 ]; then
+        iptables_must -A "$FWD_CHAIN" -s "$GATEWAY/32" -j ACCEPT
+        FWD_RULE_COUNT=$((FWD_RULE_COUNT + 1))
+    fi
+
     if [ "$MODE" = "all" ] && valid_cidr "$LAN_CIDR"; then
         iptables_must -A "$FWD_CHAIN" -s "$LAN_CIDR" -j ACCEPT
         FWD_RULE_COUNT=$((FWD_RULE_COUNT + 1))
@@ -376,6 +414,7 @@ fi
 sysctl_tune
 
 if [ "$ENABLED" != "1" ]; then
+    cp "$CONF" "$APPLIED_CONFIG" 2>/dev/null || true
     rm -f "$RULE_STATE" "$NEW_RULE_STATE"
     ip route flush cache 2>/dev/null || true
     log "disabled"
@@ -410,5 +449,6 @@ if [ "$APPLY_FAILED" != "0" ]; then
 fi
 
 mv "$NEW_RULE_STATE" "$RULE_STATE"
+cp "$CONF" "$APPLIED_CONFIG" 2>/dev/null || true
 ip route flush cache 2>/dev/null || true
 log "enabled mode=$MODE gateway=$GATEWAY side_ips=$SIDE_IP_COUNT side_macs=$SIDE_MAC_COUNT direct_macs=$DIRECT_MAC_COUNT fwd_rules=$FWD_RULE_COUNT dns_rules=$DNS_RULE_COUNT"

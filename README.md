@@ -211,6 +211,8 @@ http://192.168.31.1:8888/cgi-bin/sidegw.cgi?action=diagnose
 sh scripts/uninstall.sh
 ```
 
+默认卸载会先关闭并清理 sidegw；保留的当前配置会写成关闭状态，重装后不会因为保留了 `config.last_good` 而自动重新启用。上一次已验证配置仍会保留为恢复材料。
+
 连配置一起删除：
 
 ```sh

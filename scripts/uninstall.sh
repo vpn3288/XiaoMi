@@ -36,12 +36,20 @@ kill_toolbox_uhttpd() {
     done
 }
 
-keep_sidegw_config="/tmp/xiaomi-toolbox-uninstall-config.$$"
 keep_sidegw_last_good="/tmp/xiaomi-toolbox-uninstall-last-good.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-uninstall-admin-token.$$"
+
+copy_disabled_config() {
+    src="$1"
+    dst="$2"
+    {
+        echo "ENABLED='0'"
+        [ -f "$src" ] && grep -v "^ENABLED=" "$src"
+    } > "$dst"
+    return 0
+}
+
 if [ "$KEEP_CONFIG" = "1" ]; then
-    [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ] &&
-        cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" 2>/dev/null || true
     [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ] &&
         cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$keep_sidegw_last_good" 2>/dev/null || true
     [ -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ] &&
@@ -71,10 +79,8 @@ if [ "$KEEP_CONFIG" = "0" ]; then
     rm -rf "$INSTALL_DIR"
 else
     mkdir -p "$INSTALL_DIR/config"
-    if [ -f "$keep_sidegw_config" ]; then
-        cp "$keep_sidegw_config" "$INSTALL_DIR/config/sidegw.config" 2>/dev/null || true
-    elif [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
-        cp "$INSTALL_DIR/panel/modules/sidegw/config" "$INSTALL_DIR/config/sidegw.config" 2>/dev/null || true
+    if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
+        copy_disabled_config "$INSTALL_DIR/panel/modules/sidegw/config" "$INSTALL_DIR/config/sidegw.config"
     fi
     if [ -f "$keep_sidegw_last_good" ]; then
         cp "$keep_sidegw_last_good" "$INSTALL_DIR/config/sidegw.last_good" 2>/dev/null || true
@@ -85,5 +91,5 @@ else
     rm -rf "$INSTALL_DIR/panel" "$INSTALL_DIR/toolbox-bootstrap.sh"
 fi
 
-rm -f "$keep_sidegw_config" "$keep_sidegw_last_good" "$keep_admin_token"
+rm -f "$keep_sidegw_last_good" "$keep_admin_token"
 log "Uninstalled. Config kept: $KEEP_CONFIG"

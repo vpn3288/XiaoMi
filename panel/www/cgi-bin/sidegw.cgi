@@ -8,6 +8,7 @@ PENDING_GOOD="$BASE/config.pending_good"
 PENDING_UNTIL="$BASE/config.pending_until"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
 LOCK_PID="$LOCK_DIR/pid"
+LOCK_STALE_AFTER="${SIDEGW_LOCK_STALE_AFTER:-300}"
 LOCK_ACTIVE=0
 
 generate_admin_token() {
@@ -59,7 +60,21 @@ take_lock() {
     fi
 
     lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
-    if [ -z "$lock_pid" ] || ! echo "$lock_pid" | grep -Eq '^[0-9]+$' || ! kill -0 "$lock_pid" 2>/dev/null; then
+    reclaim_lock=0
+    if echo "$lock_pid" | grep -Eq '^[0-9]+$'; then
+        kill -0 "$lock_pid" 2>/dev/null || reclaim_lock=1
+    else
+        now="$(date +%s 2>/dev/null || echo 0)"
+        lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+        if echo "$now" "$lock_mtime" "$LOCK_STALE_AFTER" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$' &&
+            [ "$now" -gt 0 ] &&
+            [ "$lock_mtime" -gt 0 ] &&
+            [ $((now - lock_mtime)) -ge "$LOCK_STALE_AFTER" ]; then
+            reclaim_lock=1
+        fi
+    fi
+
+    if [ "$reclaim_lock" = "1" ]; then
         rm -f "$LOCK_PID"
         rmdir "$LOCK_DIR" 2>/dev/null || true
         if mkdir "$LOCK_DIR" 2>/dev/null; then

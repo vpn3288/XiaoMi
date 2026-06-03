@@ -36,6 +36,12 @@ bootloader
 
 预检通过只代表规则结构、旁路由可达性和路由器本机探测通过。配置会先进入 5 分钟临时确认窗口；只有用户在命中客户端确认联网和出口正常后，点击“确认客户端正常并持久化”，才会写入 `config.last_good` 并允许 crontab / firewall include 后续持续重应用。
 
-`apply.sh`、`test.sh`、`rollback.sh` 和面板保存 / 预检 / 确认 / 关闭操作使用同一把 `/tmp` 锁，避免面板、cron 和 firewall include 并发修改规则；如果进程异常退出留下旧锁，后续执行会在确认锁持有进程不存在后接管。
+`apply.sh`、`test.sh`、`rollback.sh` 和面板保存 / 预检 / 确认 / 关闭操作使用同一把 `/tmp` 锁，避免面板、cron 和 firewall include 并发修改规则；如果进程异常退出留下旧锁，后续执行会在确认锁持有进程不存在后接管。缺失或异常的锁 PID 会先按忙碌处理，只有锁目录已经明显过旧才会接管，避免刚创建锁但尚未写入 PID 的瞬间被误抢占。
 
 一键关闭只清理运行规则和待确认状态，不删除 `config.last_good`。上一次已验证配置仍可用于后续恢复或重新启用；cron / firewall include 会尊重当前关闭状态，不会仅因为 `config.last_good` 存在而自动重新启用。
+
+默认卸载会先关闭并清理 sidegw；如果选择保留配置，保存到 `config/sidegw.config` 的当前配置也会强制写为关闭状态，避免重装后自动重新启用。`config/sidegw.last_good` 只作为手动恢复材料保留。
+
+`apply.sh` 会在成功应用或成功关闭后记录 `config.applied`，用于在 `rules.state` 丢失时按上一次实际应用的网关、客户端 IP 和 LAN 网段做精确清理。安装升级会保留 `rules.state` 和 `config.applied`，但不会恢复按 pref 范围批量删除用户规则的旧做法。
+
+使用 MAC 分流时，脚本会放行来自旁路由 IP 的 LAN 内回程转发，避免只按客户端源 MAC 放行导致回包被较严格的 FORWARD 策略拦截。
