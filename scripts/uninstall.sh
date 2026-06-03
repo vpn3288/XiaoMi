@@ -39,6 +39,11 @@ kill_toolbox_uhttpd() {
 keep_sidegw_last_good="/tmp/xiaomi-toolbox-uninstall-last-good.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-uninstall-admin-token.$$"
 
+cleanup_temp() {
+    rm -f "$keep_sidegw_last_good" "$keep_admin_token"
+}
+trap cleanup_temp EXIT
+
 copy_disabled_config() {
     src="$1"
     dst="$2"

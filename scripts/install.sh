@@ -94,6 +94,14 @@ keep_sidegw_applied_config="/tmp/xiaomi-toolbox-sidegw-applied-config.$$"
 keep_sidegw_pending_good="/tmp/xiaomi-toolbox-sidegw-pending-good.$$"
 keep_sidegw_pending_until="/tmp/xiaomi-toolbox-sidegw-pending-until.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-admin-token.$$"
+
+cleanup_temp() {
+    rm -f "$keep_sidegw_config" "$keep_sidegw_last_good" "$keep_sidegw_rules_state" \
+        "$keep_sidegw_applied_config" "$keep_sidegw_pending_good" \
+        "$keep_sidegw_pending_until" "$keep_admin_token"
+}
+trap cleanup_temp EXIT
+
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
 elif [ -f "$INSTALL_DIR/config/sidegw.config" ]; then
