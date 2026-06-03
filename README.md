@@ -177,7 +177,7 @@ curl -4 ifconfig.me
 /mnt/usb-d965c2b9/xiaomi_router/toolbox/panel/modules/sidegw/rollback.sh
 ```
 
-一键关闭会清理当前运行规则并把候选配置改为关闭，但会保留 `config.last_good`，方便后续回到上一次已验证配置。
+一键关闭会清理当前运行规则并把候选配置改为关闭，但会保留 `config.last_good`，方便后续回到上一次已验证配置。cron / firewall include 会尊重当前关闭状态，不会因为 `config.last_good` 仍存在而自动重新启用。
 
 ## 诊断
 

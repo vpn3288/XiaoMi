@@ -34,4 +34,4 @@ bootloader
 
 `apply.sh`、`test.sh`、`rollback.sh` 使用同一把 `/tmp` 锁，避免面板、cron 和 firewall include 并发修改规则；如果进程异常退出留下旧锁，后续执行会在确认锁持有进程不存在后接管。
 
-一键关闭只清理运行规则和待确认状态，不删除 `config.last_good`。上一次已验证配置仍可用于后续恢复或重新启用。
+一键关闭只清理运行规则和待确认状态，不删除 `config.last_good`。上一次已验证配置仍可用于后续恢复或重新启用；cron / firewall include 会尊重当前关闭状态，不会仅因为 `config.last_good` 存在而自动重新启用。

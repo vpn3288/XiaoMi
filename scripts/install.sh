@@ -138,6 +138,11 @@ find_toolbox_uhttpd() {
     return 1
 }
 
+sidegw_config_enabled() {
+    [ -f "\$SIDEGW_BASE/config" ] || return 1
+    grep -Eq "^ENABLED=['\"]?1['\"]?\$" "\$SIDEGW_BASE/config"
+}
+
 now="\$(date +%s 2>/dev/null || echo 0)"
 pending_until="\$(cat "\$PENDING_UNTIL" 2>/dev/null || echo 0)"
 
@@ -155,10 +160,10 @@ elif [ -f "\$PENDING_GOOD" ] || [ -f "\$PENDING_UNTIL" ]; then
             rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
         fi
     fi
-elif [ -f "\$SIDEGW_BASE/config.last_good" ]; then
+elif [ -f "\$SIDEGW_BASE/config.last_good" ] && sidegw_config_enabled; then
     SIDEGW_CONFIG="\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 elif [ -x "\$SIDEGW_BASE/apply.sh" ]; then
-    SIDEGW_CONFIG="\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+    SIDEGW_CONFIG="\$SIDEGW_BASE/config" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 fi
 
 running_pid="\$(find_toolbox_uhttpd)"
