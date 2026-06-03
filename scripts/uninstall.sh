@@ -47,8 +47,12 @@ if [ "$KEEP_CONFIG" = "0" ]; then
     [ "$CONFIRM_DELETE" = "1" ] || die "--delete-config requires --yes-delete"
     rm -rf "$INSTALL_DIR"
 else
+    mkdir -p "$INSTALL_DIR/config"
+    [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ] &&
+        cp "$INSTALL_DIR/panel/modules/sidegw/config" "$INSTALL_DIR/config/sidegw.config" 2>/dev/null || true
+    [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ] &&
+        cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$INSTALL_DIR/config/sidegw.last_good" 2>/dev/null || true
     rm -rf "$INSTALL_DIR/panel" "$INSTALL_DIR/toolbox-bootstrap.sh"
-    rm -f "$INSTALL_DIR/$INSTALL_MARKER"
 fi
 
 log "Uninstalled. Config kept: $KEEP_CONFIG"

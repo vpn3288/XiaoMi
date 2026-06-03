@@ -67,8 +67,16 @@ mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/log" "$INSTALL_DIR/config"
 printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write install marker"
 
 keep_sidegw_config="/tmp/xiaomi-toolbox-sidegw-config.$$"
+keep_sidegw_last_good="/tmp/xiaomi-toolbox-sidegw-last-good.$$"
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
+elif [ -f "$INSTALL_DIR/config/sidegw.config" ]; then
+    cp "$INSTALL_DIR/config/sidegw.config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
+fi
+if [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ]; then
+    cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$keep_sidegw_last_good" || die "cannot preserve sidegw last-good config"
+elif [ -f "$INSTALL_DIR/config/sidegw.last_good" ]; then
+    cp "$INSTALL_DIR/config/sidegw.last_good" "$keep_sidegw_last_good" || die "cannot preserve sidegw last-good config"
 fi
 
 backup_path_move "$INSTALL_DIR/panel/www"
@@ -120,6 +128,9 @@ if [ -f "$keep_sidegw_config" ]; then
     mv "$keep_sidegw_config" "$INSTALL_DIR/panel/modules/sidegw/config"
 elif [ ! -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config.default" "$INSTALL_DIR/panel/modules/sidegw/config"
+fi
+if [ -f "$keep_sidegw_last_good" ]; then
+    mv "$keep_sidegw_last_good" "$INSTALL_DIR/panel/modules/sidegw/config.last_good"
 fi
 
 if [ "$AUTOSTART" = "1" ]; then
