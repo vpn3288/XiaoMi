@@ -6,6 +6,7 @@ DEFAULT_HOST="192.168.31.1"
 DEFAULT_PORT="8888"
 CRON_MARK="# xiaomi-toolbox"
 FIREWALL_SECTION="xiaomi_toolbox_bootstrap"
+INSTALL_MARKER=".xiaomi-toolbox-install"
 
 log() {
     printf '%s\n' "$*"
@@ -77,9 +78,16 @@ is_safe_install_dir() {
         *) return 1 ;;
     esac
     case "$path" in
-        /bin|/bin/*|/sbin|/sbin/*|/usr|/usr/*|/etc|/etc/*|/lib|/lib/*|/var|/var/*|/root|/root/*|/home|/home/*|/mnt|/tmp|/opt)
+        /mnt/*/xiaomi_router/toolbox)
+            return 0
+            ;;
+        *)
             return 1
             ;;
     esac
-    return 0
+}
+
+require_install_marker() {
+    dir="$1"
+    [ -f "$dir/$INSTALL_MARKER" ] || die "install marker missing: $dir/$INSTALL_MARKER"
 }

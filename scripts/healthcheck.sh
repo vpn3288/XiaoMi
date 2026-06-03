@@ -1,7 +1,7 @@
 #!/bin/sh
 set -u
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
@@ -12,7 +12,7 @@ uname -a 2>/dev/null || true
 date 2>/dev/null || true
 
 echo "=== commands ==="
-for cmd in ip iptables uci uhttpd netstat; do
+for cmd in ip iptables uci uhttpd pidof; do
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "$cmd: ok"
     else
@@ -34,4 +34,3 @@ if [ -x "$INSTALL_DIR/panel/modules/sidegw/diagnose.sh" ]; then
 else
     echo "sidegw diagnose missing"
 fi
-

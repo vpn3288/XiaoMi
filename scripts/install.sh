@@ -1,7 +1,7 @@
 #!/bin/sh
 set -u
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
@@ -45,13 +45,6 @@ echo "$PORT" | grep -Eq '^[0-9]{1,5}$' || die "invalid port: $PORT"
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "invalid port: $PORT"
 is_safe_install_dir "$INSTALL_DIR" || die "unsafe install dir: $INSTALL_DIR"
 
-ensure_cmd ip
-ensure_cmd iptables
-ensure_cmd uci
-ensure_cmd uhttpd
-
-[ -d /sys/class/net/br-lan ] || die "br-lan not found; this installer expects Xiaomi/OpenWrt-like LAN bridge"
-
 log "Install dir: $INSTALL_DIR"
 log "Panel URL: http://$HOST:$PORT/"
 log "Dry run: $DRY_RUN"
@@ -62,7 +55,16 @@ if [ "$DRY_RUN" = "1" ]; then
     exit 0
 fi
 
+ensure_cmd ip
+ensure_cmd iptables
+ensure_cmd uci
+ensure_cmd uhttpd
+ensure_cmd pidof
+
+[ -d /sys/class/net/br-lan ] || die "br-lan not found; this installer expects Xiaomi/OpenWrt-like LAN bridge"
+
 mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/log" "$INSTALL_DIR/config"
+printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write install marker"
 
 keep_sidegw_config="/tmp/xiaomi-toolbox-sidegw-config.$$"
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
@@ -88,18 +90,28 @@ HOST='$HOST'
 PORT='$PORT'
 EOF
 
+UHTTPD_BIN="$(command -v uhttpd)"
 cat > "$INSTALL_DIR/toolbox-bootstrap.sh" <<EOF
 #!/bin/sh
 INSTALL_DIR='$INSTALL_DIR'
 HOST='$HOST'
 PORT='$PORT'
+UHTTPD_BIN='$UHTTPD_BIN'
+PID_FILE='/var/run/xiaomi-toolbox.pid'
+SIDEGW_BASE="\$INSTALL_DIR/panel/modules/sidegw"
 
-[ -x "\$INSTALL_DIR/panel/modules/sidegw/apply.sh" ] && "\$INSTALL_DIR/panel/modules/sidegw/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+if [ -f "\$SIDEGW_BASE/config.last_good" ]; then
+    SIDEGW_CONFIG="\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+elif [ -x "\$SIDEGW_BASE/apply.sh" ]; then
+    SIDEGW_CONFIG="\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+fi
 
-if ! netstat -lnp 2>/dev/null | grep -q "\$HOST:\$PORT.*uhttpd"; then
-    kill "\$(cat /var/run/xiaomi-toolbox.pid 2>/dev/null)" 2>/dev/null || true
-    /usr/sbin/uhttpd -p "\$HOST:\$PORT" -h "\$INSTALL_DIR/panel/www" -x /cgi-bin -t 60 -T 30 -D
-    pgrep -f "uhttpd -p \$HOST:\$PORT" | head -n 1 > /var/run/xiaomi-toolbox.pid
+if [ -s "\$PID_FILE" ] && kill -0 "\$(cat "\$PID_FILE")" 2>/dev/null; then
+    :
+else
+    kill "\$(cat "\$PID_FILE" 2>/dev/null)" 2>/dev/null || true
+    "\$UHTTPD_BIN" -p "\$HOST:\$PORT" -h "\$INSTALL_DIR/panel/www" -x /cgi-bin -t 60 -T 30 -D
+    pidof uhttpd 2>/dev/null | awk '{print \$1}' > "\$PID_FILE"
 fi
 EOF
 chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh"

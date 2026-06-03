@@ -1,6 +1,6 @@
 #!/bin/sh
 
-INSTALL_DIR="${INSTALL_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)}"
+INSTALL_DIR="${INSTALL_DIR:-$(CDPATH= cd "$(dirname "$0")/../../.." && pwd)}"
 BASE="$INSTALL_DIR/panel/modules/sidegw"
 CONF="$BASE/config"
 
@@ -103,8 +103,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
     case "$ACTION" in
         save)
-            write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-            MSG="已保存配置。未执行预检。"
+            write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
+            MSG="已保存配置，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
             ;;
         apply)
             MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"

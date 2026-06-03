@@ -1,7 +1,7 @@
 #!/bin/sh
 
-BASE="${SIDEGW_BASE:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
-CONF="$BASE/config"
+BASE="${SIDEGW_BASE:-$(CDPATH= cd "$(dirname "$0")" && pwd)}"
+CONF="${SIDEGW_CONFIG:-$BASE/config}"
 TABLE="${SIDEGW_TABLE:-100}"
 LAN_IF="${SIDEGW_LAN_IF:-br-lan}"
 LAN_CIDR="${SIDEGW_LAN_CIDR:-192.168.31.0/24}"
@@ -240,6 +240,16 @@ DIRECT_MACS="${DIRECT_MACS:-}"
 
 [ "$MODE" = "all" ] || MODE="list"
 
+if [ "$ENABLED" = "1" ]; then
+    valid_ip "$GATEWAY" || { log "invalid gateway: $GATEWAY"; exit 1; }
+    valid_cidr "$LAN_CIDR" || { log "invalid lan cidr: $LAN_CIDR"; exit 1; }
+    [ -d "/sys/class/net/$LAN_IF" ] || { log "lan interface missing: $LAN_IF"; exit 1; }
+    ip route get "$GATEWAY" >/tmp/sidegw-gateway-route.log 2>&1 || {
+        log "gateway is not reachable by current routing table: $GATEWAY"
+        exit 1
+    }
+fi
+
 i="$PREF_START"
 while [ "$i" -le "$PREF_END" ]; do
     rule_del_pref "$i"
@@ -255,8 +265,6 @@ if [ "$ENABLED" != "1" ]; then
     log "disabled"
     exit 0
 fi
-
-valid_ip "$GATEWAY" || { log "invalid gateway: $GATEWAY"; exit 1; }
 
 if ! ip route replace default via "$GATEWAY" dev "$LAN_IF" table "$TABLE" 2>/tmp/sidegw-route.err; then
     log "cannot add route via $GATEWAY: $(cat /tmp/sidegw-route.err)"

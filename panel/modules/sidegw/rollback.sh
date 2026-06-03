@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BASE="${SIDEGW_BASE:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
+BASE="${SIDEGW_BASE:-$(CDPATH= cd "$(dirname "$0")" && pwd)}"
 CONF="$BASE/config"
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 
@@ -12,3 +12,4 @@ tmp="$CONF.tmp"
 mv "$tmp" "$CONF"
 
 "$BASE/apply.sh"
+rm -f "$BASE/config.last_good"

@@ -120,6 +120,8 @@ http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 走旁路由 IP：例如 192.168.31.216
 ```
 
+当前自动预检只允许“仅列表设备走旁路由”里的 IP 列表通过启用。MAC-only 和全 LAN 模式会先保存配置但不会自动启用，等后续加入客户端确认机制后再开放。
+
 推荐点击：
 
 ```text
@@ -182,7 +184,7 @@ sh scripts/uninstall.sh
 连配置一起删除：
 
 ```sh
-sh scripts/uninstall.sh --delete-config
+sh scripts/uninstall.sh --delete-config --yes-delete
 ```
 
 ## AI 协作文件

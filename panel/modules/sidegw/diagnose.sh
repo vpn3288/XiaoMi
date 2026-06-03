@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BASE="${SIDEGW_BASE:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
+BASE="${SIDEGW_BASE:-$(CDPATH= cd "$(dirname "$0")" && pwd)}"
 CONF="$BASE/config"
 
 echo "=== sidegw config ==="
@@ -30,6 +30,11 @@ for key in \
 do
     sysctl "$key" 2>/dev/null || true
 done
+
+echo "=== flow offload / acceleration hints ==="
+lsmod 2>/dev/null | grep -Ei 'qca[-_].*(nss|sfe|ppe)|shortcut|ecm|flow' || echo "kernel module hints: none detected"
+iptables-save 2>/dev/null | grep -i FLOWOFFLOAD || echo "iptables FLOWOFFLOAD: none detected"
+nft list ruleset 2>/dev/null | grep -Ei 'flowtable|flow offload' || echo "nft flow offload: none detected"
 
 echo "=== sidegw log ==="
 logread 2>/dev/null | grep -i sidegw | tail -50 || true
