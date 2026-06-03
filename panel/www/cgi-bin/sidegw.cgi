@@ -291,7 +291,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 fi
 
 if [ "$QUERY_ACTION" = "diagnose" ]; then
-    TOKEN_HINT_SAFE="$(printf '%s' "$ADMIN_TOKEN_FILE" | html_escape)"
+    TOKEN_HINT_SAFE="管理口令"
     if [ "$REQUEST_METHOD" = "POST" ] && authorized "$(param admin_token)"; then
         DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
         cat <<EOF
@@ -310,7 +310,7 @@ EOF
 fi
 
 MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
-TOKEN_HINT_SAFE="$(printf '%s' "$ADMIN_TOKEN_FILE" | html_escape)"
+TOKEN_HINT_SAFE="管理口令"
 if [ "$VIEW_AUTH" != "1" ]; then
     cat <<EOF
 Content-Type: text/html; charset=utf-8

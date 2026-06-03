@@ -24,7 +24,7 @@ copy_disabled_config() {
     dst="$2"
     if ! {
         echo "ENABLED='0'"
-        { [ -f "$src" ] && grep -v "^ENABLED=" "$src"; } || true
+        { [ -f "$src" ] && grep -v "^[[:space:]]*ENABLED=" "$src"; } || true
     } > "$dst"; then
         return 1
     fi
@@ -168,7 +168,7 @@ find_toolbox_uhttpd() {
 
 sidegw_config_enabled() {
     [ -f "\$SIDEGW_BASE/config" ] || return 1
-    grep -Eq "^ENABLED=['\"]?1['\"]?\$" "\$SIDEGW_BASE/config"
+    grep -Eq "^[[:space:]]*ENABLED=['\"]?1['\"]?[[:space:]]*\$" "\$SIDEGW_BASE/config"
 }
 
 now="\$(date +%s 2>/dev/null || echo 0)"

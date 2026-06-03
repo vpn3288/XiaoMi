@@ -44,7 +44,7 @@ copy_disabled_config() {
     dst="$2"
     if ! {
         echo "ENABLED='0'"
-        { [ -f "$src" ] && grep -v "^ENABLED=" "$src"; } || true
+        { [ -f "$src" ] && grep -v "^[[:space:]]*ENABLED=" "$src"; } || true
     } > "$dst"; then
         return 1
     fi

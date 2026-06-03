@@ -66,7 +66,7 @@ fi
 tmp="$CONF.tmp.$$"
 {
     echo "ENABLED='0'"
-    grep -v "^ENABLED=" "$CONF"
+    grep -v "^[[:space:]]*ENABLED=" "$CONF"
 } > "$tmp"
 mv "$tmp" "$CONF"
 

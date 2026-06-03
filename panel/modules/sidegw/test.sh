@@ -75,7 +75,7 @@ disable_candidate() {
     tmp="$CONF.tmp.$$"
     {
         echo "ENABLED='0'"
-        grep -v "^ENABLED=" "$CONF"
+        grep -v "^[[:space:]]*ENABLED=" "$CONF"
     } > "$tmp"
     mv "$tmp" "$CONF"
 }
@@ -118,7 +118,7 @@ rollback_conf="/tmp/sidegw-rollback-conf.$$"
 if [ -f "$LAST_GOOD" ]; then
     cp "$LAST_GOOD" "$rollback_conf"
 else
-    sed "s/^ENABLED=.*/ENABLED='0'/" "$BASE/config.default" > "$rollback_conf"
+    sed "s/^[[:space:]]*ENABLED=.*/ENABLED='0'/" "$BASE/config.default" > "$rollback_conf"
 fi
 
 rollback() {
