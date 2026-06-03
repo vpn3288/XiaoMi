@@ -82,7 +82,8 @@ if [ "$KEEP_CONFIG" = "0" ]; then
 else
     mkdir -p "$INSTALL_DIR/config"
     if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
-        copy_disabled_config "$INSTALL_DIR/panel/modules/sidegw/config" "$INSTALL_DIR/config/sidegw.config"
+        copy_disabled_config "$INSTALL_DIR/panel/modules/sidegw/config" "$INSTALL_DIR/config/sidegw.config" ||
+            die "cannot preserve disabled sidegw config"
     fi
     if [ -f "$keep_sidegw_last_good" ]; then
         cp "$keep_sidegw_last_good" "$INSTALL_DIR/config/sidegw.last_good" 2>/dev/null || true
