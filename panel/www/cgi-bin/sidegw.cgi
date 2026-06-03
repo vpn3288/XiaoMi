@@ -213,8 +213,12 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                     rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
                     MSG="已确认客户端联网正常，并保存为已验证配置。后续 cron/firewall 只会重应用该已验证配置。"
                 else
-                    rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
-                    MSG="没有可确认的待验证配置，或当前配置已变化。请重新应用并预检。"
+                    if [ -f "$PENDING_GOOD" ] || [ -f "$PENDING_UNTIL" ]; then
+                        MSG="没有可确认的待验证配置，或当前配置已变化。待确认回滚标记已保留，请重新应用并预检，或使用一键关闭。"
+                    else
+                        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                        MSG="没有可确认的待验证配置。请重新应用并预检。"
+                    fi
                 fi
                 ;;
             disable)

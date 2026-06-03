@@ -77,6 +77,7 @@ printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write 
 
 keep_sidegw_config="/tmp/xiaomi-toolbox-sidegw-config.$$"
 keep_sidegw_last_good="/tmp/xiaomi-toolbox-sidegw-last-good.$$"
+keep_sidegw_rules_state="/tmp/xiaomi-toolbox-sidegw-rules-state.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-admin-token.$$"
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
@@ -87,6 +88,9 @@ if [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$keep_sidegw_last_good" || die "cannot preserve sidegw last-good config"
 elif [ -f "$INSTALL_DIR/config/sidegw.last_good" ]; then
     cp "$INSTALL_DIR/config/sidegw.last_good" "$keep_sidegw_last_good" || die "cannot preserve sidegw last-good config"
+fi
+if [ -f "$INSTALL_DIR/panel/modules/sidegw/rules.state" ]; then
+    cp "$INSTALL_DIR/panel/modules/sidegw/rules.state" "$keep_sidegw_rules_state" || die "cannot preserve sidegw rules state"
 fi
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$keep_admin_token" || die "cannot preserve admin token"
@@ -185,6 +189,9 @@ elif [ ! -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
 fi
 if [ -f "$keep_sidegw_last_good" ]; then
     mv "$keep_sidegw_last_good" "$INSTALL_DIR/panel/modules/sidegw/config.last_good"
+fi
+if [ -f "$keep_sidegw_rules_state" ]; then
+    mv "$keep_sidegw_rules_state" "$INSTALL_DIR/panel/modules/sidegw/rules.state"
 fi
 if [ -f "$keep_admin_token" ]; then
     mv "$keep_admin_token" "$INSTALL_DIR/panel/modules/sidegw/admin.token"
