@@ -7,6 +7,39 @@ TEST_DOMAIN="${SIDEGW_TEST_DOMAIN:-www.google.com}"
 TEST_URL="${SIDEGW_TEST_URL:-http://connect.rom.miui.com/generate_204}"
 
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+
+disable_candidate() {
+    tmp="$CONF.tmp.$$"
+    {
+        echo "ENABLED='0'"
+        grep -v "^ENABLED=" "$CONF"
+    } > "$tmp"
+    mv "$tmp" "$CONF"
+}
+
+. "$CONF"
+ENABLED="${ENABLED:-0}"
+MODE="${MODE:-list}"
+SIDE_IPS="${SIDE_IPS:-}"
+
+if [ "$ENABLED" != "1" ]; then
+    "$BASE/rollback.sh" >/dev/null 2>&1 || true
+    echo "disabled"
+    exit 0
+fi
+
+if [ "$MODE" = "all" ]; then
+    disable_candidate
+    echo "precheck rejected; all-LAN mode requires a future confirmation workflow"
+    exit 2
+fi
+
+if [ -z "$SIDE_IPS" ]; then
+    disable_candidate
+    echo "precheck rejected; at least one side IP is required for automatic verification"
+    exit 2
+fi
+
 rollback_conf="/tmp/sidegw-rollback-conf.$$"
 if [ -f "$LAST_GOOD" ]; then
     cp "$LAST_GOOD" "$rollback_conf"
@@ -41,18 +74,6 @@ route_note=""
 router_ip="$(ip -4 addr show dev br-lan 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
 [ -n "$router_ip" ] || router_ip="192.168.31.1"
 . "$CONF"
-
-if [ "$MODE" = "all" ]; then
-    rollback
-    echo "precheck rejected; all-LAN mode requires a future confirmation workflow"
-    exit 2
-fi
-
-if [ -z "$SIDE_IPS" ]; then
-    rollback
-    echo "precheck rejected; at least one side IP is required for automatic verification"
-    exit 2
-fi
 
 nslookup "$TEST_DOMAIN" "$router_ip" >/tmp/sidegw-test-dns.log 2>&1 && dns_ok=1
 ping -c 1 -W 2 "$GATEWAY" >/tmp/sidegw-test-gateway.log 2>&1 && gateway_ok=1
