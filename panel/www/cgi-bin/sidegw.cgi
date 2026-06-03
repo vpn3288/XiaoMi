@@ -185,11 +185,17 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 MSG="$("$BASE/test.sh" 2>&1)"
                 ;;
             confirm)
-                if [ -f "$PENDING_GOOD" ] && cmp -s "$PENDING_GOOD" "$CONF"; then
+                confirm_now="$(date +%s 2>/dev/null || echo 0)"
+                confirm_until="$(cat "$PENDING_UNTIL" 2>/dev/null || echo 0)"
+                if echo "$confirm_until" | grep -Eq '^[0-9]+$' &&
+                    [ "$confirm_now" -le "$confirm_until" ] &&
+                    [ -f "$PENDING_GOOD" ] &&
+                    cmp -s "$PENDING_GOOD" "$CONF"; then
                     cp "$PENDING_GOOD" "$BASE/config.last_good"
                     rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
                     MSG="已确认客户端联网正常，并保存为已验证配置。后续 cron/firewall 只会重应用该已验证配置。"
                 else
+                    rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
                     MSG="没有可确认的待验证配置，或当前配置已变化。请重新应用并预检。"
                 fi
                 ;;
