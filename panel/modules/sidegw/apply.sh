@@ -185,6 +185,15 @@ add_dns_rules() {
     for ipaddr in $DIRECT_IPS $GATEWAY; do
         valid_ip "$ipaddr" || continue
         iptables -t nat -A "$DNS_CHAIN" -s "$ipaddr/32" -j RETURN
+        iptables -t nat -A "$DNS_POST_CHAIN" -s "$ipaddr/32" -j RETURN
+    done
+
+    iptables -t nat -A "$DNS_POST_CHAIN" -m mark --mark "$MARK_DIRECT" -j RETURN
+
+    for mac in $DIRECT_MACS; do
+        mac_lc="$(echo "$mac" | tr 'A-F' 'a-f')"
+        valid_mac "$mac_lc" || continue
+        iptables -t nat -A "$DNS_CHAIN" -m mac --mac-source "$mac_lc" -j RETURN
     done
 
     for ipaddr in $SIDE_IPS; do
@@ -201,8 +210,8 @@ add_dns_rules() {
         valid_mac "$mac_lc" || continue
         iptables -t nat -A "$DNS_CHAIN" -m mac --mac-source "$mac_lc" -p udp --dport 53 -j DNAT --to-destination "$GATEWAY"
         iptables -t nat -A "$DNS_CHAIN" -m mac --mac-source "$mac_lc" -p tcp --dport 53 -j DNAT --to-destination "$GATEWAY"
-        iptables -t nat -A "$DNS_POST_CHAIN" -d "$GATEWAY/32" -p udp --dport 53 -j SNAT --to-source "$router_ip"
-        iptables -t nat -A "$DNS_POST_CHAIN" -d "$GATEWAY/32" -p tcp --dport 53 -j SNAT --to-source "$router_ip"
+        iptables -t nat -A "$DNS_POST_CHAIN" -m mark --mark "$MARK_SIDE" -d "$GATEWAY/32" -p udp --dport 53 -j SNAT --to-source "$router_ip"
+        iptables -t nat -A "$DNS_POST_CHAIN" -m mark --mark "$MARK_SIDE" -d "$GATEWAY/32" -p tcp --dport 53 -j SNAT --to-source "$router_ip"
         dns_count=$((dns_count + 1))
     done
 

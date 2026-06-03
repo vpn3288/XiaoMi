@@ -9,7 +9,7 @@ KEEP_CONFIG=1
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --install-dir) shift; INSTALL_DIR="${1:-}" ;;
+        --install-dir) shift; [ "$#" -gt 0 ] || die "--install-dir requires PATH"; INSTALL_DIR="$1" ;;
         --delete-config) KEEP_CONFIG=0 ;;
         --help|-h)
             echo "Usage: sh scripts/uninstall.sh [--install-dir PATH] [--delete-config]"
@@ -19,6 +19,8 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+
+is_safe_install_dir "$INSTALL_DIR" || die "unsafe install dir: $INSTALL_DIR"
 
 if [ -x "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" ]; then
     "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" || true
@@ -34,6 +36,7 @@ if [ -f /etc/crontabs/root ]; then
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 fi
 
+backup_file /etc/config/firewall
 uci -q delete firewall.$FIREWALL_SECTION
 uci commit firewall >/dev/null 2>&1 || true
 
@@ -44,4 +47,3 @@ else
 fi
 
 log "Uninstalled. Config kept: $KEEP_CONFIG"
-

@@ -21,6 +21,7 @@ dns_ok=0
 route_ok=0
 gateway_ok=0
 chains_ok=0
+route_note=""
 router_ip="$(ip -4 addr show dev br-lan 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
 [ -n "$router_ip" ] || router_ip="192.168.31.1"
 . "$CONF"
@@ -28,9 +29,16 @@ router_ip="$(ip -4 addr show dev br-lan 2>/dev/null | sed -n 's/.*inet \([0-9.]*
 nslookup "$TEST_DOMAIN" "$router_ip" >/tmp/sidegw-test-dns.log 2>&1 && dns_ok=1
 ping -c 1 -W 2 "$GATEWAY" >/tmp/sidegw-test-gateway.log 2>&1 && gateway_ok=1
 
+if [ "$MODE" = "all" ] || { [ -z "$SIDE_IPS" ] && [ -n "$SIDE_MACS" ]; }; then
+    route_ok=1
+    route_note="route source check skipped for MAC-only or all-LAN mode"
+fi
+
 for ipaddr in $SIDE_IPS; do
+    route_ok=0
     ip route get 8.8.8.8 from "$ipaddr" iif br-lan 2>/tmp/sidegw-test-route.log | grep -q "via $GATEWAY" && {
         route_ok=1
+        route_note="route source check passed for $ipaddr"
         break
     }
 done
@@ -53,5 +61,6 @@ fi
 
 echo "precheck passed"
 echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok chains_ok=$chains_ok"
+[ -n "$route_note" ] && echo "$route_note"
 echo "Now test from a matched client:"
 echo "curl -4 http://ifconfig.me/ip"

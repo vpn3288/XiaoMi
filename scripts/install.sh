@@ -30,9 +30,9 @@ EOF
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
-        --install-dir) shift; INSTALL_DIR="${1:-}" ;;
-        --host) shift; HOST="${1:-}" ;;
-        --port) shift; PORT="${1:-}" ;;
+        --install-dir) shift; [ "$#" -gt 0 ] || die "--install-dir requires PATH"; INSTALL_DIR="$1" ;;
+        --host) shift; [ "$#" -gt 0 ] || die "--host requires IP"; HOST="$1" ;;
+        --port) shift; [ "$#" -gt 0 ] || die "--port requires PORT"; PORT="$1" ;;
         --no-autostart) AUTOSTART=0 ;;
         --help|-h) usage; exit 0 ;;
         *) die "unknown option: $1" ;;
@@ -42,6 +42,8 @@ done
 
 is_ipv4 "$HOST" || die "invalid host IP: $HOST"
 echo "$PORT" | grep -Eq '^[0-9]{1,5}$' || die "invalid port: $PORT"
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "invalid port: $PORT"
+is_safe_install_dir "$INSTALL_DIR" || die "unsafe install dir: $INSTALL_DIR"
 
 ensure_cmd ip
 ensure_cmd iptables
@@ -61,6 +63,17 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/log" "$INSTALL_DIR/config"
+
+keep_sidegw_config="/tmp/xiaomi-toolbox-sidegw-config.$$"
+if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
+    cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
+fi
+
+backup_path_move "$INSTALL_DIR/panel/www"
+backup_path_move "$INSTALL_DIR/panel/modules/sidegw"
+backup_file "$INSTALL_DIR/config/toolbox.conf"
+backup_file "$INSTALL_DIR/toolbox-bootstrap.sh"
+
 mkdir -p "$INSTALL_DIR/panel/www" "$INSTALL_DIR/panel/modules"
 
 cp -R "$SCRIPT_DIR/../panel/www/." "$INSTALL_DIR/panel/www/"
@@ -91,7 +104,9 @@ fi
 EOF
 chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh"
 
-if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
+if [ -f "$keep_sidegw_config" ]; then
+    mv "$keep_sidegw_config" "$INSTALL_DIR/panel/modules/sidegw/config"
+elif [ ! -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config.default" "$INSTALL_DIR/panel/modules/sidegw/config"
 fi
 
@@ -102,6 +117,7 @@ if [ "$AUTOSTART" = "1" ]; then
     cat /tmp/xiaomi-toolbox-cron > /etc/crontabs/root
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 
+    backup_file /etc/config/firewall
     uci set firewall.$FIREWALL_SECTION='include'
     uci set firewall.$FIREWALL_SECTION.type='script'
     uci set firewall.$FIREWALL_SECTION.path="$INSTALL_DIR/toolbox-bootstrap.sh"

@@ -54,7 +54,32 @@ backup_file() {
     cp "$src" "$src.bak-$ts" || die "cannot backup $src"
 }
 
+backup_path_move() {
+    src="$1"
+    [ -e "$src" ] || return 0
+    ts="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo now)"
+    mv "$src" "$src.bak-$ts" || die "cannot move backup $src"
+}
+
 ensure_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
 }
 
+is_safe_install_dir() {
+    path="$1"
+    case "$path" in
+        ""|"/"|"/."|"/.."|"."|".."|*"/../"*|*/..|../*)
+            return 1
+            ;;
+    esac
+    case "$path" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    case "$path" in
+        /bin|/bin/*|/sbin|/sbin/*|/usr|/usr/*|/etc|/etc/*|/lib|/lib/*|/var|/var/*|/root|/root/*|/home|/home/*|/mnt|/tmp|/opt)
+            return 1
+            ;;
+    esac
+    return 0
+}

@@ -37,7 +37,20 @@ clean_macs() {
 
 clean_cidr() {
     v="$(printf '%s' "$1" | tr -cd '0-9./')"
-    echo "$v" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' && echo "$v" || echo "192.168.31.0/24"
+    echo "$v" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' || {
+        echo "192.168.31.0/24"
+        return
+    }
+    ip="${v%/*}"
+    bits="${v#*/}"
+    oldifs="$IFS"
+    IFS=.
+    set -- $ip
+    IFS="$oldifs"
+    [ "$#" -eq 4 ] &&
+        [ "$1" -le 255 ] && [ "$2" -le 255 ] && [ "$3" -le 255 ] && [ "$4" -le 255 ] &&
+        [ "$bits" -ge 0 ] && [ "$bits" -le 32 ] &&
+        echo "$v" || echo "192.168.31.0/24"
 }
 
 html_escape() {
@@ -71,7 +84,11 @@ ACTION=""
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
-    POST_DATA="$(dd bs="${CONTENT_LENGTH:-0}" count=1 2>/dev/null)"
+    POST_LEN="${CONTENT_LENGTH:-0}"
+    echo "$POST_LEN" | grep -Eq '^[0-9]{1,5}$' || POST_LEN=0
+    [ "$POST_LEN" -le 32768 ] || POST_LEN=32768
+    POST_DATA=""
+    [ "$POST_LEN" -gt 0 ] && POST_DATA="$(dd bs=1 count="$POST_LEN" 2>/dev/null)"
     ACTION="$(param action)"
     ENABLED="$(param enabled)"
     [ "$ENABLED" = "1" ] || ENABLED="0"
@@ -90,8 +107,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
             MSG="已保存配置。未执行预检。"
             ;;
         apply)
-            write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-            MSG="$("$BASE/apply.sh" 2>&1)"
+            MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"
             ;;
         test)
             write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
@@ -160,7 +176,7 @@ Content-Type: text/html; charset=utf-8
 <section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
 <form method="post" action="/cgi-bin/sidegw.cgi">
 <section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div></section>
-<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="apply" class="secondary">仅应用</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
+<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
 </form>
 <section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
 <section class="card"><h2>当前规则</h2><label>ip rule</label><pre>$RULES</pre><label>table 100</label><pre>$ROUTES</pre><label>FORWARD</label><pre>$FWD</pre><label>DNS</label><pre>$DNS</pre></section>
