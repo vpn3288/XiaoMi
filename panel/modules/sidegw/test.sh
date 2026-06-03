@@ -3,8 +3,12 @@
 BASE="${SIDEGW_BASE:-$(CDPATH= cd "$(dirname "$0")" && pwd)}"
 CONF="$BASE/config"
 LAST_GOOD="$BASE/config.last_good"
+PENDING_GOOD="$BASE/config.pending_good"
+PENDING_UNTIL="$BASE/config.pending_until"
 TEST_DOMAIN="${SIDEGW_TEST_DOMAIN:-www.google.com}"
 TEST_URL="${SIDEGW_TEST_URL:-http://connect.rom.miui.com/generate_204}"
+TABLE="${SIDEGW_TABLE:-100}"
+LAN_IF="${SIDEGW_LAN_IF:-br-lan}"
 
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 
@@ -54,7 +58,22 @@ rollback() {
     else
         "$BASE/apply.sh" >/dev/null 2>&1 || true
     fi
-    rm -f "$rollback_conf"
+    rm -f "$rollback_conf" "$PENDING_GOOD" "$PENDING_UNTIL"
+}
+
+chain_has_parts() {
+    table="$1"
+    chain="$2"
+    shift 2
+    if [ "$table" = "filter" ]; then
+        lines="$(iptables -S "$chain" 2>/dev/null)" || return 1
+    else
+        lines="$(iptables -t "$table" -S "$chain" 2>/dev/null)" || return 1
+    fi
+    for part in "$@"; do
+        lines="$(printf '%s\n' "$lines" | grep -F -- "$part")" || return 1
+    done
+    [ -n "$lines" ]
 }
 
 if ! "$BASE/apply.sh"; then
@@ -66,55 +85,78 @@ fi
 sleep 3
 
 dns_ok=0
-route_ok=0
+route_ok=1
 gateway_ok=0
-chains_ok=0
+rules_ok=1
 url_ok=0
 route_note=""
-router_ip="$(ip -4 addr show dev br-lan 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
+router_ip="$(ip -4 addr show dev "$LAN_IF" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
 [ -n "$router_ip" ] || router_ip="192.168.31.1"
 . "$CONF"
 
 nslookup "$TEST_DOMAIN" "$router_ip" >/tmp/sidegw-test-dns.log 2>&1 && dns_ok=1
 ping -c 1 -W 2 "$GATEWAY" >/tmp/sidegw-test-gateway.log 2>&1 && gateway_ok=1
 
-for ipaddr in $SIDE_IPS; do
-    route_ok=0
-    ip route get 8.8.8.8 from "$ipaddr" iif br-lan 2>/tmp/sidegw-test-route.log | grep -q "via $GATEWAY" && {
-        route_ok=1
-        route_note="route source check passed for $ipaddr"
-        break
-    }
-done
+ip route show table "$TABLE" 2>/tmp/sidegw-test-table.log | grep -F "default via $GATEWAY dev $LAN_IF" >/dev/null || rules_ok=0
+ip rule 2>/tmp/sidegw-test-rule.log | grep -F "fwmark 0x64" | grep -F "lookup $TABLE" >/dev/null || rules_ok=0
+ip rule 2>/tmp/sidegw-test-direct-rule.log | grep -F "fwmark 0x65" | grep -F "lookup main" >/dev/null || rules_ok=0
 
-iptables -vnL SIDEGW_FWD >/tmp/sidegw-test-fwd.log 2>&1 &&
-    iptables -t nat -vnL SIDEGW_DNS >/tmp/sidegw-test-dns-chain.log 2>&1 &&
-    iptables -t nat -vnL SIDEGW_DNS_POST >/tmp/sidegw-test-dns-post.log 2>&1 &&
-    chains_ok=1
+for ipaddr in $SIDE_IPS; do
+    ip rule 2>/tmp/sidegw-test-side-rule.log | grep -F "from $ipaddr" | grep -F "lookup $TABLE" >/dev/null || rules_ok=0
+    chain_has_parts filter SIDEGW_FWD "-s $ipaddr/32" "-j ACCEPT" || rules_ok=0
+    chain_has_parts nat SIDEGW_DNS "-s $ipaddr/32" "-p udp" "--dport 53" "-j DNAT" "--to-destination $GATEWAY" || rules_ok=0
+    chain_has_parts nat SIDEGW_DNS "-s $ipaddr/32" "-p tcp" "--dport 53" "-j DNAT" "--to-destination $GATEWAY" || rules_ok=0
+    chain_has_parts nat SIDEGW_DNS_POST "-s $ipaddr/32" "-d $GATEWAY/32" "-p udp" "--dport 53" "-j SNAT" "--to-source $router_ip" || rules_ok=0
+    chain_has_parts nat SIDEGW_DNS_POST "-s $ipaddr/32" "-d $GATEWAY/32" "-p tcp" "--dport 53" "-j SNAT" "--to-source $router_ip" || rules_ok=0
+    if ip route get 8.8.8.8 from "$ipaddr" iif "$LAN_IF" 2>/tmp/sidegw-test-route.log | grep -q "via $GATEWAY"; then
+        route_note="route source check passed for $ipaddr"
+    else
+        route_ok=0
+    fi
+done
 
 if command -v wget >/dev/null 2>&1; then
     wget -q -T 5 -O /tmp/sidegw-test-url.out "$TEST_URL" >/tmp/sidegw-test-url.log 2>&1 && url_ok=1
 else
     url_ok=1
-    echo "wget missing; URL test skipped" >/tmp/sidegw-test-url.log
+    echo "wget missing; router URL test skipped" >/tmp/sidegw-test-url.log
 fi
 
-if [ "$dns_ok" != "1" ] || [ "$gateway_ok" != "1" ] || [ "$route_ok" != "1" ] || [ "$chains_ok" != "1" ] || [ "$url_ok" != "1" ]; then
+if [ "$dns_ok" != "1" ] || [ "$gateway_ok" != "1" ] || [ "$route_ok" != "1" ] || [ "$rules_ok" != "1" ] || [ "$url_ok" != "1" ]; then
     rollback
     echo "precheck failed; rolled back"
-    echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok chains_ok=$chains_ok url_ok=$url_ok"
+    echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok rules_ok=$rules_ok url_ok=$url_ok"
     cat /tmp/sidegw-test-dns.log 2>/dev/null || true
     cat /tmp/sidegw-test-gateway.log 2>/dev/null || true
+    cat /tmp/sidegw-test-table.log 2>/dev/null || true
+    cat /tmp/sidegw-test-rule.log 2>/dev/null || true
+    cat /tmp/sidegw-test-side-rule.log 2>/dev/null || true
     cat /tmp/sidegw-test-route.log 2>/dev/null || true
     cat /tmp/sidegw-test-url.log 2>/dev/null || true
     exit 2
 fi
 
-cp "$CONF" "$LAST_GOOD"
+cp "$CONF" "$PENDING_GOOD"
+now="$(date +%s 2>/dev/null || echo 0)"
+echo $((now + 300)) > "$PENDING_UNTIL"
 rm -f "$rollback_conf"
 
-echo "precheck passed"
-echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok chains_ok=$chains_ok url_ok=$url_ok"
+(
+    sleep 300
+    pending_until="$(cat "$PENDING_UNTIL" 2>/dev/null || echo 0)"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    if echo "$pending_until" | grep -Eq '^[0-9]+$' && [ -f "$PENDING_GOOD" ] && [ "$now" -ge "$pending_until" ]; then
+        if [ -f "$LAST_GOOD" ]; then
+            SIDEGW_CONFIG="$LAST_GOOD" "$BASE/apply.sh" >/dev/null 2>&1 || true
+        else
+            "$BASE/rollback.sh" >/dev/null 2>&1 || true
+        fi
+        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+    fi
+) >/dev/null 2>&1 &
+
+echo "precheck passed; rules are temporarily active for client confirmation"
+echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok rules_ok=$rules_ok url_ok=$url_ok"
 [ -n "$route_note" ] && echo "$route_note"
-echo "Now test from a matched client:"
+echo "Now test from a matched client, then click the panel confirmation button within 5 minutes:"
 echo "curl -4 http://ifconfig.me/ip"

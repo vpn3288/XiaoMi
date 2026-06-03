@@ -3,10 +3,77 @@
 INSTALL_DIR="${INSTALL_DIR:-$(CDPATH= cd "$(dirname "$0")/../../.." && pwd)}"
 BASE="$INSTALL_DIR/panel/modules/sidegw"
 CONF="$BASE/config"
+ADMIN_TOKEN_FILE="$BASE/admin.token"
+PENDING_GOOD="$BASE/config.pending_good"
+PENDING_UNTIL="$BASE/config.pending_until"
+
+generate_admin_token() {
+    token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+    if [ -n "$token" ]; then
+        printf '%s\n' "$token"
+    else
+        printf '%s%s\n' "$(date +%s 2>/dev/null || echo now)" "$$"
+    fi
+}
+
+admin_token() {
+    if [ ! -s "$ADMIN_TOKEN_FILE" ]; then
+        mkdir -p "$BASE"
+        old_umask="$(umask)"
+        umask 077
+        generate_admin_token > "$ADMIN_TOKEN_FILE"
+        umask "$old_umask"
+    fi
+    cat "$ADMIN_TOKEN_FILE" 2>/dev/null
+}
+
+hex_value() {
+    case "$1" in
+        0) echo 0 ;;
+        1) echo 1 ;;
+        2) echo 2 ;;
+        3) echo 3 ;;
+        4) echo 4 ;;
+        5) echo 5 ;;
+        6) echo 6 ;;
+        7) echo 7 ;;
+        8) echo 8 ;;
+        9) echo 9 ;;
+        a|A) echo 10 ;;
+        b|B) echo 11 ;;
+        c|C) echo 12 ;;
+        d|D) echo 13 ;;
+        e|E) echo 14 ;;
+        f|F) echo 15 ;;
+    esac
+}
 
 url_decode() {
-    data="$(printf '%s' "$1" | sed 's/+/ /g; s/%/\\x/g')"
-    printf '%b' "$data"
+    input="$1"
+    while [ -n "$input" ]; do
+        case "$input" in
+            +*)
+                printf ' '
+                input="${input#?}"
+                ;;
+            %[0-9A-Fa-f][0-9A-Fa-f]*)
+                hex="${input#%}"
+                hex="${hex%"${hex#??}"}"
+                high="${hex%"${hex#?}"}"
+                low="${hex#?}"
+                low="${low%"${low#?}"}"
+                dec=$(( $(hex_value "$high") * 16 + $(hex_value "$low") ))
+                oct="$(printf '%03o' "$dec")"
+                printf '%b' "\\$oct"
+                input="${input#???}"
+                ;;
+            *)
+                first="${input%"${input#?}"}"
+                printf '%s' "$first"
+                input="${input#?}"
+                ;;
+        esac
+    done
 }
 
 param() {
@@ -90,33 +157,47 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     POST_DATA=""
     [ "$POST_LEN" -gt 0 ] && POST_DATA="$(dd bs=1 count="$POST_LEN" 2>/dev/null)"
     ACTION="$(param action)"
-    ENABLED="$(param enabled)"
-    [ "$ENABLED" = "1" ] || ENABLED="0"
-    MODE="$(param mode)"
-    [ "$MODE" = "all" ] || MODE="list"
-    GATEWAY="$(url_decode "$(param gateway)" | tr -cd '0-9.')"
-    LAN_CIDR="$(clean_cidr "$(url_decode "$(param lan_cidr)")")"
-    SIDE_IPS="$(clean_ips "$(url_decode "$(param side_ips)")")"
-    SIDE_MACS="$(clean_macs "$(url_decode "$(param side_macs)")")"
-    DIRECT_IPS="$(clean_ips "$(url_decode "$(param direct_ips)")")"
-    DIRECT_MACS="$(clean_macs "$(url_decode "$(param direct_macs)")")"
+    if [ "$(param admin_token)" != "$(admin_token)" ]; then
+        MSG="管理口令不正确，已拒绝本次操作。"
+    else
+        ENABLED="$(param enabled)"
+        [ "$ENABLED" = "1" ] || ENABLED="0"
+        MODE="$(param mode)"
+        [ "$MODE" = "all" ] || MODE="list"
+        GATEWAY="$(url_decode "$(param gateway)" | tr -cd '0-9.')"
+        LAN_CIDR="$(clean_cidr "$(url_decode "$(param lan_cidr)")")"
+        SIDE_IPS="$(clean_ips "$(url_decode "$(param side_ips)")")"
+        SIDE_MACS="$(clean_macs "$(url_decode "$(param side_macs)")")"
+        DIRECT_IPS="$(clean_ips "$(url_decode "$(param direct_ips)")")"
+        DIRECT_MACS="$(clean_macs "$(url_decode "$(param direct_macs)")")"
 
-    case "$ACTION" in
-        save)
-            write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-            MSG="已保存配置，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
-            ;;
-        apply)
-            MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"
-            ;;
-        test)
-            write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-            MSG="$("$BASE/test.sh" 2>&1)"
-            ;;
-        disable)
-            MSG="$("$BASE/rollback.sh" 2>&1)"
-            ;;
-    esac
+        case "$ACTION" in
+            save)
+                write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
+                rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                MSG="已保存配置，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
+                ;;
+            apply)
+                MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"
+                ;;
+            test)
+                write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
+                MSG="$("$BASE/test.sh" 2>&1)"
+                ;;
+            confirm)
+                if [ -f "$PENDING_GOOD" ] && cmp -s "$PENDING_GOOD" "$CONF"; then
+                    cp "$PENDING_GOOD" "$BASE/config.last_good"
+                    rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                    MSG="已确认客户端联网正常，并保存为已验证配置。后续 cron/firewall 只会重应用该已验证配置。"
+                else
+                    MSG="没有可确认的待验证配置，或当前配置已变化。请重新应用并预检。"
+                fi
+                ;;
+            disable)
+                MSG="$("$BASE/rollback.sh" 2>&1)"
+                ;;
+        esac
+    fi
 fi
 
 QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
@@ -156,6 +237,14 @@ ROUTER_IP_SAFE="$(printf '%s' "$ROUTER_IP" | html_escape)"
 CURRENT_IP_SAFE="$(printf '%s' "$CURRENT_IP" | html_escape)"
 GATEWAY_SAFE="$(printf '%s' "$GATEWAY" | html_escape)"
 LAN_CIDR_SAFE="$(printf '%s' "$LAN_CIDR" | html_escape)"
+TOKEN_HINT_SAFE="$(printf '%s' "$ADMIN_TOKEN_FILE" | html_escape)"
+PENDING_STATUS="无待确认配置"
+now="$(date +%s 2>/dev/null || echo 0)"
+pending_until="$(cat "$PENDING_UNTIL" 2>/dev/null || echo 0)"
+if echo "$pending_until" | grep -Eq '^[0-9]+$' && [ -f "$PENDING_GOOD" ] && [ "$now" -le "$pending_until" ]; then
+    PENDING_STATUS="待确认配置有效，请在命中客户端测试外网后确认"
+fi
+PENDING_STATUS_SAFE="$(printf '%s' "$PENDING_STATUS" | html_escape)"
 
 checked=""
 [ "$ENABLED" = "1" ] && checked="checked"
@@ -179,8 +268,8 @@ Content-Type: text/html; charset=utf-8
 <main>
 <section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP_SAFE</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP_SAFE</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY_SAFE</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
 <form method="post" action="/cgi-bin/sidegw.cgi">
-<section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div></section>
-<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
+<section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div><div><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div></div><p>待确认状态：$PENDING_STATUS_SAFE</p></section>
+<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="confirm">确认客户端正常并持久化</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
 </form>
 <section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
 <section class="card"><h2>当前规则</h2><label>ip rule</label><pre>$RULES</pre><label>table 100</label><pre>$ROUTES</pre><label>FORWARD</label><pre>$FWD</pre><label>DNS</label><pre>$DNS</pre></section>

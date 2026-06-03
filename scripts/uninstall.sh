@@ -25,11 +25,34 @@ done
 is_safe_install_dir "$INSTALL_DIR" || die "unsafe install dir: $INSTALL_DIR"
 require_install_marker "$INSTALL_DIR"
 
+kill_toolbox_uhttpd() {
+    for pid in $(pidof uhttpd 2>/dev/null); do
+        cmdline="$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null)"
+        case "$cmdline" in
+            *"$INSTALL_DIR/panel/www"*)
+                kill "$pid" 2>/dev/null || true
+                ;;
+        esac
+    done
+}
+
+keep_sidegw_config="/tmp/xiaomi-toolbox-uninstall-config.$$"
+keep_sidegw_last_good="/tmp/xiaomi-toolbox-uninstall-last-good.$$"
+keep_admin_token="/tmp/xiaomi-toolbox-uninstall-admin-token.$$"
+if [ "$KEEP_CONFIG" = "1" ]; then
+    [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ] &&
+        cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" 2>/dev/null || true
+    [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ] &&
+        cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$keep_sidegw_last_good" 2>/dev/null || true
+    [ -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ] &&
+        cp "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$keep_admin_token" 2>/dev/null || true
+fi
+
 if [ -x "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" ]; then
     "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" || true
 fi
 
-kill "$(cat /var/run/xiaomi-toolbox.pid 2>/dev/null)" 2>/dev/null || true
+kill_toolbox_uhttpd
 rm -f /var/run/xiaomi-toolbox.pid
 
 if [ -f /etc/crontabs/root ]; then
@@ -48,11 +71,19 @@ if [ "$KEEP_CONFIG" = "0" ]; then
     rm -rf "$INSTALL_DIR"
 else
     mkdir -p "$INSTALL_DIR/config"
-    [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ] &&
+    if [ -f "$keep_sidegw_config" ]; then
+        cp "$keep_sidegw_config" "$INSTALL_DIR/config/sidegw.config" 2>/dev/null || true
+    elif [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
         cp "$INSTALL_DIR/panel/modules/sidegw/config" "$INSTALL_DIR/config/sidegw.config" 2>/dev/null || true
-    [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ] &&
-        cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$INSTALL_DIR/config/sidegw.last_good" 2>/dev/null || true
+    fi
+    if [ -f "$keep_sidegw_last_good" ]; then
+        cp "$keep_sidegw_last_good" "$INSTALL_DIR/config/sidegw.last_good" 2>/dev/null || true
+    fi
+    if [ -f "$keep_admin_token" ]; then
+        cp "$keep_admin_token" "$INSTALL_DIR/config/admin.token" 2>/dev/null || true
+    fi
     rm -rf "$INSTALL_DIR/panel" "$INSTALL_DIR/toolbox-bootstrap.sh"
 fi
 
+rm -f "$keep_sidegw_config" "$keep_sidegw_last_good" "$keep_admin_token"
 log "Uninstalled. Config kept: $KEEP_CONFIG"

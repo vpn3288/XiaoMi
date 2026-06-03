@@ -77,14 +77,7 @@ is_safe_install_dir() {
         /*) ;;
         *) return 1 ;;
     esac
-    case "$path" in
-        /mnt/*/xiaomi_router/toolbox)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+    echo "$path" | grep -Eq '^/mnt/[A-Za-z0-9._-]+/xiaomi_router/toolbox$'
 }
 
 require_install_marker() {

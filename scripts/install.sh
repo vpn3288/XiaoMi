@@ -10,6 +10,15 @@ PORT="$DEFAULT_PORT"
 DRY_RUN=0
 AUTOSTART=1
 
+generate_admin_token() {
+    token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+    if [ -n "$token" ]; then
+        printf '%s\n' "$token"
+    else
+        printf '%s%s\n' "$(date +%s 2>/dev/null || echo now)" "$$"
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: sh scripts/install.sh [options]
@@ -68,6 +77,7 @@ printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write 
 
 keep_sidegw_config="/tmp/xiaomi-toolbox-sidegw-config.$$"
 keep_sidegw_last_good="/tmp/xiaomi-toolbox-sidegw-last-good.$$"
+keep_admin_token="/tmp/xiaomi-toolbox-admin-token.$$"
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
 elif [ -f "$INSTALL_DIR/config/sidegw.config" ]; then
@@ -77,6 +87,11 @@ if [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "$keep_sidegw_last_good" || die "cannot preserve sidegw last-good config"
 elif [ -f "$INSTALL_DIR/config/sidegw.last_good" ]; then
     cp "$INSTALL_DIR/config/sidegw.last_good" "$keep_sidegw_last_good" || die "cannot preserve sidegw last-good config"
+fi
+if [ -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
+    cp "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$keep_admin_token" || die "cannot preserve admin token"
+elif [ -f "$INSTALL_DIR/config/admin.token" ]; then
+    cp "$INSTALL_DIR/config/admin.token" "$keep_admin_token" || die "cannot preserve admin token"
 fi
 
 backup_path_move "$INSTALL_DIR/panel/www"
@@ -107,19 +122,43 @@ PORT='$PORT'
 UHTTPD_BIN='$UHTTPD_BIN'
 PID_FILE='/var/run/xiaomi-toolbox.pid'
 SIDEGW_BASE="\$INSTALL_DIR/panel/modules/sidegw"
+PENDING_GOOD="\$SIDEGW_BASE/config.pending_good"
+PENDING_UNTIL="\$SIDEGW_BASE/config.pending_until"
 
-if [ -f "\$SIDEGW_BASE/config.last_good" ]; then
+find_toolbox_uhttpd() {
+    for pid in \$(pidof uhttpd 2>/dev/null); do
+        cmdline="\$(tr '\000' ' ' < "/proc/\$pid/cmdline" 2>/dev/null)"
+        case "\$cmdline" in
+            *"\$INSTALL_DIR/panel/www"*)
+                echo "\$pid"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+now="\$(date +%s 2>/dev/null || echo 0)"
+pending_until="\$(cat "\$PENDING_UNTIL" 2>/dev/null || echo 0)"
+
+if echo "\$pending_until" | grep -Eq '^[0-9]+$' && [ -f "\$PENDING_GOOD" ] && [ "\$now" -le "\$pending_until" ]; then
+    SIDEGW_CONFIG="\$PENDING_GOOD" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+elif [ -f "\$SIDEGW_BASE/config.last_good" ]; then
+    rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
     SIDEGW_CONFIG="\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 elif [ -x "\$SIDEGW_BASE/apply.sh" ]; then
+    rm -f "\$PENDING_GOOD" "\$PENDING_UNTIL"
     SIDEGW_CONFIG="\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 fi
 
-if [ -s "\$PID_FILE" ] && kill -0 "\$(cat "\$PID_FILE")" 2>/dev/null; then
+running_pid="\$(find_toolbox_uhttpd)"
+if [ -n "\$running_pid" ] && kill -0 "\$running_pid" 2>/dev/null; then
+    echo "\$running_pid" > "\$PID_FILE"
     :
 else
-    kill "\$(cat "\$PID_FILE" 2>/dev/null)" 2>/dev/null || true
     "\$UHTTPD_BIN" -p "\$HOST:\$PORT" -h "\$INSTALL_DIR/panel/www" -x /cgi-bin -t 60 -T 30 -D
-    pidof uhttpd 2>/dev/null | awk '{print \$1}' > "\$PID_FILE"
+    sleep 1
+    find_toolbox_uhttpd > "\$PID_FILE" 2>/dev/null || rm -f "\$PID_FILE"
 fi
 EOF
 chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh"
@@ -131,6 +170,15 @@ elif [ ! -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
 fi
 if [ -f "$keep_sidegw_last_good" ]; then
     mv "$keep_sidegw_last_good" "$INSTALL_DIR/panel/modules/sidegw/config.last_good"
+fi
+if [ -f "$keep_admin_token" ]; then
+    mv "$keep_admin_token" "$INSTALL_DIR/panel/modules/sidegw/admin.token"
+fi
+if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
+    old_umask="$(umask)"
+    umask 077
+    generate_admin_token > "$INSTALL_DIR/panel/modules/sidegw/admin.token" || die "cannot write admin token"
+    umask "$old_umask"
 fi
 
 if [ "$AUTOSTART" = "1" ]; then
@@ -152,4 +200,6 @@ fi
 
 log "Installed."
 log "Open: http://$HOST:$PORT/"
+log "Panel management token: $(cat "$INSTALL_DIR/panel/modules/sidegw/admin.token")"
+log "Keep this token. The panel requires it for save/apply/confirm/disable actions."
 log "sidegw is installed but remains disabled until you enable it in the panel."
