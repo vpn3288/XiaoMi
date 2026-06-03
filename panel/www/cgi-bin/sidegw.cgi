@@ -188,8 +188,12 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         case "$ACTION" in
             save)
                 write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-                rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
-                MSG="已保存配置，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
+                if SAVE_CLEANUP="$("$BASE/apply.sh" 2>&1)"; then
+                    rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                    MSG="已保存配置并清理当前运行规则，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
+                else
+                    MSG="已保存配置，但清理当前运行规则失败；待确认回滚标记已保留。输出：$SAVE_CLEANUP"
+                fi
                 ;;
             apply)
                 MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"
