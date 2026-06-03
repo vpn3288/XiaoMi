@@ -42,10 +42,12 @@ keep_admin_token="/tmp/xiaomi-toolbox-uninstall-admin-token.$$"
 copy_disabled_config() {
     src="$1"
     dst="$2"
-    {
+    if ! {
         echo "ENABLED='0'"
-        [ -f "$src" ] && grep -v "^ENABLED=" "$src"
-    } > "$dst"
+        { [ -f "$src" ] && grep -v "^ENABLED=" "$src"; } || true
+    } > "$dst"; then
+        return 1
+    fi
     return 0
 }
 
