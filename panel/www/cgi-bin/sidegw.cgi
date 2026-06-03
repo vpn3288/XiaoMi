@@ -6,6 +6,9 @@ CONF="$BASE/config"
 ADMIN_TOKEN_FILE="$BASE/admin.token"
 PENDING_GOOD="$BASE/config.pending_good"
 PENDING_UNTIL="$BASE/config.pending_until"
+LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
+LOCK_PID="$LOCK_DIR/pid"
+LOCK_ACTIVE=0
 
 generate_admin_token() {
     token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
@@ -34,6 +37,41 @@ authorized() {
     [ -n "$server" ] || return 1
     [ -n "$posted" ] || return 1
     [ "$posted" = "$server" ]
+}
+
+release_lock() {
+    [ "$LOCK_ACTIVE" = "1" ] || return
+    lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
+    [ "$lock_pid" = "$$" ] || return
+    rm -f "$LOCK_PID"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+take_lock() {
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+            LOCK_ACTIVE=1
+            trap 'release_lock' EXIT INT TERM
+            return 0
+        fi
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
+    if [ -z "$lock_pid" ] || ! echo "$lock_pid" | grep -Eq '^[0-9]+$' || ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -f "$LOCK_PID"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+                LOCK_ACTIVE=1
+                trap 'release_lock' EXIT INT TERM
+                return 0
+            fi
+            rmdir "$LOCK_DIR" 2>/dev/null || true
+        fi
+    fi
+    return 1
 }
 
 hex_value() {
@@ -186,9 +224,18 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         DIRECT_MACS="$(clean_macs "$(url_decode "$(param direct_macs)")")"
 
         case "$ACTION" in
+            save|test|confirm|disable)
+                if ! take_lock; then
+                    MSG="sidegw 正忙，另一个应用、预检、确认或回滚正在运行。请稍后重试。"
+                    ACTION=""
+                fi
+                ;;
+        esac
+
+        case "$ACTION" in
             save)
                 write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-                if SAVE_CLEANUP="$("$BASE/apply.sh" 2>&1)"; then
+                if SAVE_CLEANUP="$(SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" 2>&1)"; then
                     rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
                     MSG="已保存配置并清理当前运行规则，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
                 else
@@ -200,7 +247,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 ;;
             test)
                 write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-                MSG="$("$BASE/test.sh" 2>&1)"
+                MSG="$(SIDEGW_LOCK_HELD=1 "$BASE/test.sh" 2>&1)"
                 ;;
             confirm)
                 confirm_now="$(date +%s 2>/dev/null || echo 0)"
@@ -222,7 +269,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 fi
                 ;;
             disable)
-                MSG="$("$BASE/rollback.sh" 2>&1)"
+                MSG="$(SIDEGW_LOCK_HELD=1 "$BASE/rollback.sh" 2>&1)"
                 ;;
         esac
     fi

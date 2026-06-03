@@ -36,6 +36,6 @@ bootloader
 
 预检通过只代表规则结构、旁路由可达性和路由器本机探测通过。配置会先进入 5 分钟临时确认窗口；只有用户在命中客户端确认联网和出口正常后，点击“确认客户端正常并持久化”，才会写入 `config.last_good` 并允许 crontab / firewall include 后续持续重应用。
 
-`apply.sh`、`test.sh`、`rollback.sh` 使用同一把 `/tmp` 锁，避免面板、cron 和 firewall include 并发修改规则；如果进程异常退出留下旧锁，后续执行会在确认锁持有进程不存在后接管。
+`apply.sh`、`test.sh`、`rollback.sh` 和面板保存 / 预检 / 确认 / 关闭操作使用同一把 `/tmp` 锁，避免面板、cron 和 firewall include 并发修改规则；如果进程异常退出留下旧锁，后续执行会在确认锁持有进程不存在后接管。
 
 一键关闭只清理运行规则和待确认状态，不删除 `config.last_good`。上一次已验证配置仍可用于后续恢复或重新启用；cron / firewall include 会尊重当前关闭状态，不会仅因为 `config.last_good` 存在而自动重新启用。

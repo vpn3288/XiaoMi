@@ -205,6 +205,7 @@ echo $((now + 300)) > "$PENDING_UNTIL"
 rm -f "$rollback_conf"
 
 (
+    SIDEGW_LOCK_HELD=0
     sleep 300
     pending_until="$(cat "$PENDING_UNTIL" 2>/dev/null || echo 0)"
     now="$(date +%s 2>/dev/null || echo 0)"
