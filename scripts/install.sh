@@ -14,11 +14,8 @@ UNINSTALL=0
 
 generate_admin_token() {
     token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
-    if [ -n "$token" ]; then
-        printf '%s\n' "$token"
-    else
-        printf '%s%s\n' "$(date +%s 2>/dev/null || echo now)" "$$"
-    fi
+    [ -n "$token" ] || return 1
+    printf '%s\n' "$token"
 }
 
 valid_admin_token() {
@@ -379,22 +376,30 @@ elif [ -f "$keep_admin_token" ]; then
     chmod 600 "$INSTALL_DIR/panel/modules/sidegw/admin.token" 2>/dev/null || true
 fi
 if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
-    write_admin_token "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$(generate_admin_token)" || die "cannot write admin token"
+    new_admin_token="$(generate_admin_token)" || die "cannot generate strong admin token; pass --admin-token explicitly"
+    write_admin_token "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$new_admin_token" || die "cannot write admin token"
 fi
 
 if [ "$AUTOSTART" = "1" ]; then
     backup_file /etc/crontabs/root
-    grep -v "$CRON_MARK" /etc/crontabs/root 2>/dev/null > /tmp/xiaomi-toolbox-cron || true
-    echo "* * * * * $INSTALL_DIR/toolbox-bootstrap.sh >/dev/null 2>&1 $CRON_MARK" >> /tmp/xiaomi-toolbox-cron
-    cat /tmp/xiaomi-toolbox-cron > /etc/crontabs/root
+    cron_tmp="/tmp/xiaomi-toolbox-cron.$$"
+    if [ -f /etc/crontabs/root ]; then
+        grep -v "$CRON_MARK" /etc/crontabs/root > "$cron_tmp" || die "cannot prepare crontab update"
+    else
+        : > "$cron_tmp" || die "cannot prepare crontab update"
+    fi
+    echo "* * * * * $INSTALL_DIR/toolbox-bootstrap.sh >/dev/null 2>&1 $CRON_MARK" >> "$cron_tmp" ||
+        die "cannot append toolbox cron entry"
+    cat "$cron_tmp" > /etc/crontabs/root || die "cannot write /etc/crontabs/root"
+    rm -f "$cron_tmp"
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 
     backup_file /etc/config/firewall
-    uci set "firewall.$FIREWALL_SECTION=include"
-    uci set "firewall.$FIREWALL_SECTION.type=script"
-    uci set "firewall.$FIREWALL_SECTION.path=$INSTALL_DIR/toolbox-bootstrap.sh"
-    uci set "firewall.$FIREWALL_SECTION.enabled=1"
-    uci commit firewall
+    uci set "firewall.$FIREWALL_SECTION=include" || die "cannot set firewall include"
+    uci set "firewall.$FIREWALL_SECTION.type=script" || die "cannot set firewall include type"
+    uci set "firewall.$FIREWALL_SECTION.path=$INSTALL_DIR/toolbox-bootstrap.sh" || die "cannot set firewall include path"
+    uci set "firewall.$FIREWALL_SECTION.enabled=1" || die "cannot enable firewall include"
+    uci commit firewall || die "cannot commit firewall config"
 fi
 
 "$INSTALL_DIR/toolbox-bootstrap.sh" || die "failed to start toolbox panel"

@@ -25,8 +25,12 @@ docs/second-round-change-summary.md
 6. 重装时旧 config 若启用但缺少 config.last_good 或 pending 验证态，会降级为 ENABLED='0'，避免未验证配置自动复活。
 7. 面板危险动作增加浏览器二次确认，并要求服务端收到 action_confirm 才执行。
 8. write_config 写入改为临时文件 + mv；写入失败时不再继续 apply/test/confirm。
-9. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
-10. README 补充 dry-run 检查范围、服务端动作确认、install.sh --uninstall 和静态检查命令。
+9. 管理口令生成取消 date+PID 弱随机兜底；强随机失败时中止安装或拒绝自动生成。
+10. 诊断页、当前配置和规则详情改为需要管理口令后查看。
+11. change_token 增加服务端动作确认。
+12. cron/firewall autostart 写入增加失败中止。
+13. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
+14. README 补充 dry-run 检查范围、服务端动作确认、JS 要求、install.sh --uninstall 和静态检查命令。
 ```
 
 ## 安全措施
@@ -38,6 +42,8 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 危险面板动作需要管理口令，且现在有浏览器二次确认和服务端动作确认。
 未验证启用配置不会在重装后自动复活。
 关键配置写入失败时停止后续网络规则动作，避免旧配置被误 apply。
+管理口令只允许强随机生成；无法生成时要求人工传入。
+诊断输出、当前配置和 iptables/ip rule 详情不再匿名展示。
 本轮未改动 sidegw 已验证的 ip rule、iptables、DNS DNAT/SNAT 核心规则。
 ```
 
@@ -50,13 +56,17 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 3. /proc/mounts grep 正则误匹配：已修改为 awk 字段匹配。
 4. 关键 cp/mv/write_config/cp last_good 未检查失败：已修改。
 5. 应用并预检、确认持久化、保存并清理规则缺少明确确认或文案：已修改。
+6. 弱随机管理口令兜底：已修改。
+7. 匿名诊断/规则详情泄露：已修改。
+8. change_token 缺少二次确认：已修改。
+9. cron/firewall 写入失败未中止：已修改。
 
 建议修改：
 1. netstat preflight：已加入。
 2. README 说明服务端确认和 RUN_SHELLCHECK=1 状态：已修改。
-3. dry-run 更完整的写权限/端口占用预检查：可暂缓。
-4. stat -c 锁回收兼容性：可暂缓。
-5. tests/shellcheck/run.sh 空白文件名支持：可暂缓，仓库脚本路径当前无空白。
+3. tests/shellcheck/run.sh 空白文件名支持：已修改为逐行读取。
+4. dry-run 更完整的写权限/端口占用预检查：可暂缓。
+5. stat -c 锁回收兼容性：可暂缓。
 
 可暂缓：
 1. shellcheck 全绿。本轮默认 sh -n 必过，RUN_SHELLCHECK=1 作为严格审查入口。
@@ -67,7 +77,7 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 2. 更新安装是否保留启用状态：最终按更保守方案处理，只保留已验证/待确认状态，未验证启用配置降级关闭。
 
 主笔最终决策：
-先合入安全阻塞项，再进入下一轮审查；不把 shellcheck 历史 warning 作为本轮阻塞项。
+先合入安全阻塞项，再进入下一轮审查；不把 shellcheck 历史 warning 作为本轮阻塞项。OpenCode 本轮因 API Unauthorized 无法完成有效审查，需要更换或修复 key。
 ```
 
 ## 风险点列表

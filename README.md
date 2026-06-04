@@ -161,6 +161,8 @@ Panel management token: 一长串口令
 cat /mnt/usb-d965c2b9/xiaomi_router/toolbox/panel/modules/sidegw/admin.token
 ```
 
+如果路由器无法从 `/dev/urandom` 生成强随机管理口令，安装会中止。此时请先检查系统随机源，或显式传入 `--admin-token`。
+
 ## 如果 U 盘路径不同
 
 如果你的 U 盘不是 `/mnt/usb-d965c2b9`，先在 SSH 里看实际路径：
@@ -192,9 +194,11 @@ sh scripts/install.sh --install-dir /mnt/sda1/xiaomi_router/toolbox --host 192.1
 http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 ```
 
-面板会直接显示当前配置和诊断信息。执行保存、预检、确认持久化、删除或关闭时，在“确认客户端正常并持久化”旁边的当前管理口令框填入安装时显示的 Panel management token。
+面板会显示基础入口。当前配置、运行规则和诊断输出需要提交管理口令后查看。执行保存、预检、确认持久化、删除或关闭时，在“确认客户端正常并持久化”旁边的当前管理口令框填入安装时显示的 Panel management token。
 
 会影响运行规则的动作还会弹出二次确认；服务端也会校验本次按钮动作的确认参数。只带管理口令直接 POST 危险动作会被拒绝。
+
+面板的危险操作需要浏览器启用 JavaScript。禁用 JavaScript 时，服务端会拒绝缺少二次确认参数的危险动作。
 
 ## 新手推荐填写
 

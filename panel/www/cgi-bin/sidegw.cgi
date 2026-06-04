@@ -13,11 +13,8 @@ LOCK_ACTIVE=0
 
 generate_admin_token() {
     token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
-    if [ -n "$token" ]; then
-        printf '%s\n' "$token"
-    else
-        printf '%s%s\n' "$(date +%s 2>/dev/null || echo now)" "$$"
-    fi
+    [ -n "$token" ] || return 1
+    printf '%s\n' "$token"
 }
 
 admin_token() {
@@ -25,7 +22,11 @@ admin_token() {
         mkdir -p "$BASE"
         old_umask="$(umask)"
         umask 077
-        generate_admin_token > "$ADMIN_TOKEN_FILE"
+        if ! generate_admin_token > "$ADMIN_TOKEN_FILE"; then
+            rm -f "$ADMIN_TOKEN_FILE"
+            umask "$old_umask"
+            return 1
+        fi
         chmod 600 "$ADMIN_TOKEN_FILE" 2>/dev/null || true
         umask "$old_umask"
     fi
@@ -234,6 +235,8 @@ write_config_file() {
     direct_ips="$8"
     direct_macs="$9"
     tmp="$dst.tmp.$$"
+    [ "$enabled" = "0" ] || [ "$enabled" = "1" ] || return 1
+    [ "$mode" = "list" ] || [ "$mode" = "all" ] || return 1
     mkdir -p "$BASE" || return 1
     {
         echo "ENABLED='$enabled'"
@@ -283,6 +286,7 @@ remove_entries_from_config_file() {
 MSG=""
 ACTION=""
 POST_DATA=""
+VIEW_AUTH=0
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
 
@@ -292,11 +296,13 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     [ "$POST_LEN" -le 32768 ] || POST_LEN=32768
     [ "$POST_LEN" -gt 0 ] && POST_DATA="$(dd bs=1 count="$POST_LEN" 2>/dev/null)"
     ACTION="$(param action)"
-    if [ "$QUERY_ACTION" = "diagnose" ]; then
-        :
-    elif ! authorized "$(param admin_token)"; then
-        MSG="管理口令不正确，已拒绝本次操作。"
+    if authorized "$(param admin_token)"; then
+        VIEW_AUTH=1
     else
+        MSG="管理口令不正确，已拒绝本次操作。"
+    fi
+
+    if [ "$VIEW_AUTH" = "1" ] && [ "$QUERY_ACTION" != "diagnose" ]; then
         ENABLED="$(param enabled)"
         [ "$ENABLED" = "1" ] || ENABLED="0"
         MODE="$(param mode)"
@@ -309,7 +315,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         DIRECT_MACS="$(clean_macs "$(url_decode "$(param direct_macs)")")"
 
         case "$ACTION" in
-            save|test|confirm|disable|delete_rules|remove_entries)
+            save|test|confirm|disable|delete_rules|remove_entries|change_token)
                 if [ "$(param action_confirm)" != "$ACTION" ]; then
                     MSG="危险操作缺少二次确认，已拒绝执行。请从面板按钮重新确认。"
                     ACTION=""
@@ -431,20 +437,27 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     fi
 fi
 
+TOKEN_HINT_SAFE="管理口令"
+
 if [ "$QUERY_ACTION" = "diagnose" ]; then
-    DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
+    if [ "$VIEW_AUTH" = "1" ]; then
+        DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
+    else
+        DIAG="请输入管理口令后查看诊断输出。"
+    fi
     cat <<EOF
 Content-Type: text/html; charset=utf-8
 
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>诊断</title><link rel="stylesheet" href="/assets/style.css"></head><body><aside><div class="brand">小米路由工具箱</div><nav><a href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a class="active" href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside><main><section class="card"><h1>诊断输出</h1><pre>$DIAG</pre></section></main></body></html>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>诊断</title><link rel="stylesheet" href="/assets/style.css"></head><body><aside><div class="brand">小米路由工具箱</div><nav><a href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a class="active" href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside><main><noscript><section class="card danger-zone"><p>诊断和危险操作需要启用 JavaScript 与管理口令。</p></section></noscript><section class="card"><h1>诊断输出</h1><form method="post" action="/cgi-bin/sidegw.cgi?action=diagnose"><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"><button name="action" value="view_diagnose">查看诊断</button></form><pre>$DIAG</pre></section></main></body></html>
 EOF
     exit 0
 fi
 
 MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
-TOKEN_HINT_SAFE="管理口令"
 
-. "$CONF"
+if [ "$VIEW_AUTH" = "1" ]; then
+    . "$CONF"
+fi
 ENABLED="${ENABLED:-0}"
 MODE="${MODE:-list}"
 GATEWAY="${GATEWAY:-}"
@@ -454,17 +467,28 @@ SIDE_MACS="${SIDE_MACS:-}"
 DIRECT_IPS="${DIRECT_IPS:-}"
 DIRECT_MACS="${DIRECT_MACS:-}"
 
-ROUTER_IP="$(ip -4 addr show br-lan 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
+if [ "$VIEW_AUTH" = "1" ]; then
+    ROUTER_IP="$(ip -4 addr show br-lan 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
+else
+    ROUTER_IP="需管理口令"
+fi
 CURRENT_IP="${REMOTE_ADDR:-unknown}"
 PING_STATUS="未测试"
-if echo "$GATEWAY" | grep -Eq '^[0-9.]+$'; then
+if [ "$VIEW_AUTH" = "1" ] && echo "$GATEWAY" | grep -Eq '^[0-9.]+$'; then
     ping -c 1 -W 1 "$GATEWAY" >/dev/null 2>&1 && PING_STATUS="可达" || PING_STATUS="不可达"
 fi
 
-RULES="$(ip rule 2>/dev/null | grep -E 'lookup 100|fwmark 0x64|fwmark 0x65' | html_escape)"
-ROUTES="$(ip route show table 100 2>/dev/null | html_escape)"
-FWD="$(iptables -vnL SIDEGW_FWD 2>/dev/null | html_escape)"
-DNS="$(iptables -t nat -vnL SIDEGW_DNS 2>/dev/null | html_escape)"
+if [ "$VIEW_AUTH" = "1" ]; then
+    RULES="$(ip rule 2>/dev/null | grep -E 'lookup 100|fwmark 0x64|fwmark 0x65' | html_escape)"
+    ROUTES="$(ip route show table 100 2>/dev/null | html_escape)"
+    FWD="$(iptables -vnL SIDEGW_FWD 2>/dev/null | html_escape)"
+    DNS="$(iptables -t nat -vnL SIDEGW_DNS 2>/dev/null | html_escape)"
+else
+    RULES="需要管理口令查看"
+    ROUTES="需要管理口令查看"
+    FWD="需要管理口令查看"
+    DNS="需要管理口令查看"
+fi
 ROUTER_IP_SAFE="$(printf '%s' "$ROUTER_IP" | html_escape)"
 CURRENT_IP_SAFE="$(printf '%s' "$CURRENT_IP" | html_escape)"
 GATEWAY_SAFE="$(printf '%s' "$GATEWAY" | html_escape)"
@@ -497,16 +521,18 @@ Content-Type: text/html; charset=utf-8
 <body>
 <aside><div class="brand">小米路由工具箱</div><nav><a class="active" href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside>
 <main>
+<noscript><section class="card danger-zone"><p>本面板查看诊断和执行危险操作需要启用 JavaScript 与管理口令。</p></section></noscript>
 <section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP_SAFE</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP_SAFE</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY_SAFE</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
 <form method="post" action="/cgi-bin/sidegw.cgi">
 <input type="hidden" name="action_confirm" value="">
 <section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div><p>待确认状态：$PENDING_STATUS_SAFE</p></section>
-<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“当前访问 IP”只用于提示，不会自动加入分流列表。“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="actions"><button name="action" value="save" onclick="this.form.elements.action_confirm.value='save'; return confirm('确认保存为关闭配置并清理当前 sidegw 运行规则？')">保存为关闭配置并清理当前规则</button><button name="action" value="test" onclick="this.form.elements.action_confirm.value='test'; return confirm('确认临时修改路由和 DNS 规则并开始 5 分钟预检？失败会自动回滚。')">应用并预检，失败自动回滚</button><label class="token-field"><span>当前管理口令</span><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></label><button name="action" value="confirm" onclick="this.form.elements.action_confirm.value='confirm'; return confirm('确认已在命中客户端验证外网正常，并保存为后续可重应用配置？')">确认客户端正常并持久化</button><button name="action" value="disable" class="danger" onclick="this.form.elements.action_confirm.value='disable'; return confirm('确认关闭 sidegw 并清理当前运行规则？')">一键关闭</button></div></section>
+<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“当前访问 IP”只用于提示，不会自动加入分流列表。“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="actions"><button name="action" value="save" onclick="this.form.elements.action_confirm.value='save'; return confirm('确认保存为关闭配置并清理当前 sidegw 运行规则？')">保存为关闭配置并清理当前规则</button><button name="action" value="test" onclick="this.form.elements.action_confirm.value='test'; return confirm('确认临时修改路由和 DNS 规则并开始 5 分钟预检？失败会自动回滚。')">应用并预检，失败自动回滚</button><label class="token-field"><span>当前管理口令</span><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></label><button name="action" value="view">查看当前配置</button><button name="action" value="confirm" onclick="this.form.elements.action_confirm.value='confirm'; return confirm('确认已在命中客户端验证外网正常，并保存为后续可重应用配置？')">确认客户端正常并持久化</button><button name="action" value="disable" class="danger" onclick="this.form.elements.action_confirm.value='disable'; return confirm('确认关闭 sidegw 并清理当前运行规则？')">一键关闭</button></div></section>
 <section class="card"><h2>删除配置条目</h2><div class="grid"><div><label>删除 IP</label><textarea name="remove_ips"></textarea></div><div><label>删除 MAC</label><textarea name="remove_macs"></textarea></div></div><div class="actions"><button name="action" value="remove_entries" onclick="this.form.elements.action_confirm.value='remove_entries'; return confirm('确认删除这些 IP 或 MAC 配置条目？')">删除配置条目</button></div></section>
 <section class="card"><h2>删除所有规则</h2><div class="actions"><button name="action" value="delete_rules" class="danger" onclick="this.form.elements.action_confirm.value='delete_rules'; return confirm('确认删除所有 sidegw 运行规则并关闭当前配置？')">删除所有规则</button></div></section>
 </form>
 <form method="post" action="/cgi-bin/sidegw.cgi">
-<section class="card"><h2>修改管理口令</h2><div class="grid"><div><label>当前管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div><div><label>新管理口令</label><input name="new_admin_token" type="password" autocomplete="new-password" placeholder="6-64 位"></div><div><label>再次输入新口令</label><input name="new_admin_token_confirm" type="password" autocomplete="new-password" placeholder="再次输入"></div></div><div class="actions"><button name="action" value="change_token">更新管理口令</button></div></section>
+<input type="hidden" name="action_confirm" value="">
+<section class="card"><h2>修改管理口令</h2><div class="grid"><div><label>当前管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div><div><label>新管理口令</label><input name="new_admin_token" type="password" autocomplete="new-password" placeholder="6-64 位"></div><div><label>再次输入新口令</label><input name="new_admin_token_confirm" type="password" autocomplete="new-password" placeholder="再次输入"></div></div><div class="actions"><button name="action" value="change_token" onclick="this.form.elements.action_confirm.value='change_token'; return confirm('确认更新管理口令？下一次操作必须使用新口令。')">更新管理口令</button></div></section>
 </form>
 <section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
 <section class="card"><h2>当前规则</h2><label>ip rule</label><pre>$RULES</pre><label>table 100</label><pre>$ROUTES</pre><label>FORWARD</label><pre>$FWD</pre><label>DNS</label><pre>$DNS</pre></section>
