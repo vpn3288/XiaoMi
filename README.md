@@ -39,11 +39,48 @@ sidegw 指定 IP / MAC 分流
 至少知道一台要测试的客户端 IP，例如 192.168.31.216
 ```
 
-除本地下载和本地开 HTTP 服务外，安装命令都在“小米路由器 SSH”里执行。
+推荐安装方式是在本地电脑 PowerShell 里执行命令：本地电脑负责访问 GitHub，小米万兆只通过 SSH 接收文件并安装。
 
-## 本地中转安装，推荐
+## PowerShell 安装，推荐
 
-这个方式适合小米万兆主路由不能访问 GitHub 的情况。GitHub 下载发生在本地电脑，小米只从局域网下载本地电脑已经准备好的安装包。
+这个方式适合小米万兆主路由不能访问 GitHub，但本地电脑可以访问 GitHub 的情况。命令在本地电脑 PowerShell 里执行，不是在小米路由器 SSH 里执行。
+
+整段复制到本地电脑 PowerShell 执行：
+
+```powershell
+$router="root@192.168.31.1"
+$work="$env:TEMP\XiaoMi-install"
+
+Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+git clone --depth 1 https://github.com/vpn3288/XiaoMi.git $work
+
+ssh $router "rm -rf /tmp/XiaoMi-main"
+scp -O -r $work "${router}:/tmp/XiaoMi-main"
+
+ssh $router "cd /tmp/XiaoMi-main && sh scripts/install.sh --dry-run && sh scripts/install.sh"
+```
+
+`scp -O` 很重要。小米路由器通常没有 `/usr/libexec/sftp-server`，新版 Windows `scp` 默认走 SFTP 会失败，`-O` 会强制使用老式 SCP 协议。
+
+如果你的路由器 SSH 地址不是 `root@192.168.31.1`，只改第一行：
+
+```powershell
+$router="root@192.168.31.1"
+```
+
+如果你的 U 盘路径不是默认的 `/mnt/usb-d965c2b9`，把最后一行换成：
+
+```powershell
+ssh $router "cd /tmp/XiaoMi-main && sh scripts/install.sh --dry-run --install-dir /mnt/sda1/xiaomi_router/toolbox && sh scripts/install.sh --install-dir /mnt/sda1/xiaomi_router/toolbox"
+```
+
+把 `/mnt/sda1` 换成你实际的 U 盘挂载路径。
+
+`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
+
+## 本地 HTTP 中转安装，备用
+
+如果不想用 `scp`，也可以在本地电脑下载并开 HTTP 文件服务，让小米从局域网下载。
 
 先在本地电脑下载：
 
@@ -63,9 +100,7 @@ XiaoMi-main.tar.gz
 http://192.168.31.216:8765/XiaoMi-main.tar.gz
 ```
 
-这里的 `192.168.31.216` 换成你的本地电脑 LAN IP。HTTP 文件服务可以用 SSH 工具自带的本地文件服务、HFS、Everything HTTP 服务、MobaXterm/FinalShell 的本地服务，或任何你习惯的本地 HTTP 文件服务器。
-
-确认本地链接能打开后，SSH 登录小米万兆路由器，整段复制执行：
+这里的 `192.168.31.216` 换成你的本地电脑 LAN IP。确认本地链接能打开后，SSH 登录小米万兆路由器，整段复制执行：
 
 ```sh
 cd /tmp
@@ -82,8 +117,6 @@ sh scripts/install.sh
 ```sh
 wget -O XiaoMi-main.tar.gz http://你的电脑IP:端口/XiaoMi-main.tar.gz
 ```
-
-`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
 
 ## GitHub 直连安装，备用
 
