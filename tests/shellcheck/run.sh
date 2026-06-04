@@ -12,7 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-find scripts panel -type f \( -name '*.sh' -o -name '*.cgi' \) | sort > "$FILES_FILE" || exit 1
+find scripts panel tests -type f \( -name '*.sh' -o -name '*.cgi' \) | sort > "$FILES_FILE" || exit 1
 
 while IFS= read -r file; do
     printf 'sh -n %s\n' "$file"

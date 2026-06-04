@@ -168,14 +168,20 @@ keep_sidegw_applied_config="/tmp/xiaomi-toolbox-sidegw-applied-config.$$"
 keep_sidegw_pending_good="/tmp/xiaomi-toolbox-sidegw-pending-good.$$"
 keep_sidegw_pending_until="/tmp/xiaomi-toolbox-sidegw-pending-until.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-admin-token.$$"
+keep_cron_root="/tmp/xiaomi-toolbox-crontab-root.$$"
+keep_firewall_config="/tmp/xiaomi-toolbox-firewall-config.$$"
 RESTORE_ON_FAIL=0
+AUTOSTART_TOUCHED=0
+CRON_EXISTED=0
+FIREWALL_EXISTED=0
 panel_www_backup=""
 sidegw_backup=""
 
 cleanup_temp() {
     rm -f "$keep_sidegw_config" "$keep_sidegw_last_good" "$keep_sidegw_rules_state" \
         "$keep_sidegw_applied_config" "$keep_sidegw_pending_good" \
-        "$keep_sidegw_pending_until" "$keep_admin_token"
+        "$keep_sidegw_pending_until" "$keep_admin_token" \
+        "$keep_cron_root" "$keep_firewall_config"
 }
 
 restore_install_failure() {
@@ -187,6 +193,17 @@ restore_install_failure() {
     if [ -n "$sidegw_backup" ] && [ -d "$sidegw_backup" ]; then
         rm -rf "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
         mv "$sidegw_backup" "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
+    fi
+    if [ "$AUTOSTART_TOUCHED" = "1" ]; then
+        if [ "$CRON_EXISTED" = "1" ] && [ -f "$keep_cron_root" ]; then
+            cat "$keep_cron_root" > /etc/crontabs/root 2>/dev/null || true
+        elif [ "$CRON_EXISTED" = "0" ]; then
+            rm -f /etc/crontabs/root 2>/dev/null || true
+        fi
+        if [ "$FIREWALL_EXISTED" = "1" ] && [ -f "$keep_firewall_config" ]; then
+            cat "$keep_firewall_config" > /etc/config/firewall 2>/dev/null || true
+            uci commit firewall >/dev/null 2>&1 || true
+        fi
     fi
 }
 
@@ -205,8 +222,7 @@ restore_temp_file() {
     label="$3"
     [ -f "$src" ] || return 0
     if ! cp "$src" "$dst"; then
-        trap - EXIT
-        die "cannot restore $label to $dst; preserved temp files remain in /tmp"
+        die "cannot restore $label to $dst"
     fi
     rm -f "$src"
 }
@@ -217,8 +233,7 @@ restore_disabled_temp_file() {
     label="$3"
     [ -f "$src" ] || return 0
     if ! copy_disabled_config "$src" "$dst"; then
-        trap - EXIT
-        die "cannot restore disabled $label to $dst; preserved temp files remain in /tmp"
+        die "cannot restore disabled $label to $dst"
     fi
     rm -f "$src"
 }
@@ -421,6 +436,16 @@ if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
 fi
 
 if [ "$AUTOSTART" = "1" ]; then
+    AUTOSTART_TOUCHED=1
+    if [ -f /etc/crontabs/root ]; then
+        CRON_EXISTED=1
+        cp /etc/crontabs/root "$keep_cron_root" || die "cannot preserve /etc/crontabs/root"
+    fi
+    if [ -f /etc/config/firewall ]; then
+        FIREWALL_EXISTED=1
+        cp /etc/config/firewall "$keep_firewall_config" || die "cannot preserve /etc/config/firewall"
+    fi
+
     backup_file /etc/crontabs/root
     cron_tmp="/tmp/xiaomi-toolbox-cron.$$"
     if [ -f /etc/crontabs/root ]; then

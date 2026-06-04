@@ -10,6 +10,8 @@
 README.md
 scripts/install.sh
 panel/www/cgi-bin/sidegw.cgi
+panel/modules/sidegw/test.sh
+panel/modules/sidegw/rollback.sh
 tests/shellcheck/run.sh
 docs/second-round-change-summary.md
 ```
@@ -37,7 +39,7 @@ docs/second-round-change-summary.md
 18. 安装完成前校验 apply.sh、test.sh、rollback.sh 可执行。
 19. test.sh 写待确认/自动回滚标记失败时立即回滚并失败退出。
 20. rollback.sh 写关闭配置或替换配置失败时硬失败，避免假成功。
-21. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
+21. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n 并覆盖 scripts、panel、tests；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
 22. README 补充 dry-run 检查范围、服务端动作确认、JS 要求、install.sh --uninstall 和静态检查命令。
 ```
 
@@ -107,7 +109,7 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 ## 如何回滚
 
 ```sh
-git checkout -- README.md scripts/install.sh panel/www/cgi-bin/sidegw.cgi tests/shellcheck/run.sh docs/second-round-change-summary.md
+git checkout -- README.md scripts/install.sh panel/www/cgi-bin/sidegw.cgi panel/modules/sidegw/test.sh panel/modules/sidegw/rollback.sh tests/shellcheck/run.sh docs/second-round-change-summary.md
 ```
 
 路由器已安装环境的功能回滚：

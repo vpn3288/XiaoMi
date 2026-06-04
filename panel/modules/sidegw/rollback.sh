@@ -85,4 +85,7 @@ SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" || {
     echo "rollback failed; sidegw rules may still be active" >&2
     exit 1
 }
-rm -f "$BASE/config.pending_good" "$BASE/config.pending_until"
+rm -f "$BASE/config.pending_good" "$BASE/config.pending_until" || {
+    echo "rollback failed; pending confirmation markers may still exist" >&2
+    exit 1
+}

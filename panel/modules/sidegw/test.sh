@@ -68,7 +68,10 @@ if [ "$LOCK_HELD" != "1" ]; then
     fi
 fi
 
-[ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+[ -f "$CONF" ] || cp "$BASE/config.default" "$CONF" || {
+    echo "precheck failed; cannot initialize sidegw config"
+    exit 1
+}
 rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
 
 disable_candidate() {
@@ -76,8 +79,14 @@ disable_candidate() {
     {
         echo "ENABLED='0'"
         grep -v "^[[:space:]]*ENABLED=" "$CONF"
-    } > "$tmp"
-    mv "$tmp" "$CONF"
+    } > "$tmp" || {
+        rm -f "$tmp"
+        return 1
+    }
+    mv "$tmp" "$CONF" || {
+        rm -f "$tmp"
+        return 1
+    }
 }
 
 . "$CONF"
@@ -95,7 +104,10 @@ if [ "$ENABLED" != "1" ]; then
 fi
 
 if [ "$MODE" = "all" ]; then
-    disable_candidate
+    if ! disable_candidate; then
+        echo "precheck rejected; cannot write disabled candidate config"
+        exit 1
+    fi
     if ! SIDEGW_LOCK_HELD=1 "$BASE/apply.sh"; then
         echo "precheck rejected; cleanup failed"
         exit 1
@@ -105,7 +117,10 @@ if [ "$MODE" = "all" ]; then
 fi
 
 if [ -z "$SIDE_IPS" ]; then
-    disable_candidate
+    if ! disable_candidate; then
+        echo "precheck rejected; cannot write disabled candidate config"
+        exit 1
+    fi
     if ! SIDEGW_LOCK_HELD=1 "$BASE/apply.sh"; then
         echo "precheck rejected; cleanup failed"
         exit 1
@@ -116,17 +131,23 @@ fi
 
 rollback_conf="/tmp/sidegw-rollback-conf.$$"
 if [ -f "$LAST_GOOD" ]; then
-    cp "$LAST_GOOD" "$rollback_conf"
+    cp "$LAST_GOOD" "$rollback_conf" || {
+        echo "precheck failed; cannot prepare last-good rollback config"
+        exit 1
+    }
 else
-    sed "s/^[[:space:]]*ENABLED=.*/ENABLED='0'/" "$BASE/config.default" > "$rollback_conf"
+    sed "s/^[[:space:]]*ENABLED=.*/ENABLED='0'/" "$BASE/config.default" > "$rollback_conf" || {
+        echo "precheck failed; cannot prepare disabled rollback config"
+        exit 1
+    }
 fi
 
 rollback() {
     rollback_failed=0
-    cp "$rollback_conf" "$CONF"
-    if [ -f "$LAST_GOOD" ]; then
+    cp "$rollback_conf" "$CONF" || rollback_failed=1
+    if [ "$rollback_failed" = "0" ] && [ -f "$LAST_GOOD" ]; then
         SIDEGW_LOCK_HELD=1 SIDEGW_CONFIG="$LAST_GOOD" "$BASE/apply.sh" >/dev/null 2>&1 || rollback_failed=1
-    else
+    elif [ "$rollback_failed" = "0" ]; then
         SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" >/dev/null 2>&1 || rollback_failed=1
     fi
     rm -f "$rollback_conf" "$PENDING_GOOD" "$PENDING_UNTIL"
