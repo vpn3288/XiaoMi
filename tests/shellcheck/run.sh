@@ -4,7 +4,8 @@ set -u
 ROOT="$(unset CDPATH; cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT" || exit 1
 
-FILES_FILE="/tmp/xiaomi-toolbox-shell-files.$$"
+TMP_BASE="${TMPDIR:-/tmp}"
+FILES_FILE="$TMP_BASE/xiaomi-toolbox-shell-files.$$"
 STATUS=0
 
 cleanup() {

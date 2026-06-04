@@ -12,6 +12,7 @@ DRY_RUN=0
 AUTOSTART=1
 ADMIN_TOKEN=""
 UNINSTALL=0
+INSTALL_EXISTED=0
 
 generate_admin_token() {
     token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
@@ -106,6 +107,10 @@ preflight() {
     ensure_cmd pidof
     ensure_cmd netstat
     ensure_cmd awk
+    ensure_cmd dd
+    ensure_cmd od
+    ensure_cmd tr
+    ensure_cmd nslookup
 
     [ -d /sys/class/net/br-lan ] || die "br-lan not found; this installer expects Xiaomi/OpenWrt-like LAN bridge"
 
@@ -159,6 +164,8 @@ if [ "$DRY_RUN" = "1" ]; then
     exit 0
 fi
 
+[ -f "$INSTALL_DIR/$INSTALL_MARKER" ] && INSTALL_EXISTED=1
+
 mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/log" "$INSTALL_DIR/config"
 printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write install marker"
 disable_legacy_sidegw_panel
@@ -200,6 +207,11 @@ restore_install_failure() {
             uci -q delete "firewall.$FIREWALL_SECTION" 2>/dev/null || true
             uci commit firewall >/dev/null 2>&1 || true
         fi
+    fi
+    if [ "$INSTALL_EXISTED" = "0" ]; then
+        rm -rf "$INSTALL_DIR/panel" 2>/dev/null || true
+        rm -f "$INSTALL_DIR/toolbox-bootstrap.sh" "$INSTALL_DIR/config/toolbox.conf" "$INSTALL_DIR/$INSTALL_MARKER" 2>/dev/null || true
+        rmdir "$INSTALL_DIR/config" "$INSTALL_DIR/log" "$INSTALL_DIR" 2>/dev/null || true
     fi
     [ "$RESTORE_ON_FAIL" = "1" ] || return 0
     if [ -n "$panel_www_backup" ] && [ -d "$panel_www_backup" ]; then

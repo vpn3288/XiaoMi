@@ -8,6 +8,7 @@ PENDING_GOOD="$BASE/config.pending_good"
 PENDING_UNTIL="$BASE/config.pending_until"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
 LOCK_PID="$LOCK_DIR/pid"
+LOCK_TIME="$LOCK_DIR/created"
 LOCK_STALE_AFTER="${SIDEGW_LOCK_STALE_AFTER:-300}"
 LOCK_ACTIVE=0
 
@@ -68,13 +69,14 @@ release_lock() {
     [ "$LOCK_ACTIVE" = "1" ] || return
     lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
     [ "$lock_pid" = "$$" ] || return
-    rm -f "$LOCK_PID"
+    rm -f "$LOCK_PID" "$LOCK_TIME"
     rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
 take_lock() {
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+            date +%s > "$LOCK_TIME" 2>/dev/null || true
             LOCK_ACTIVE=1
             trap 'release_lock' EXIT INT TERM
             return 0
@@ -89,7 +91,7 @@ take_lock() {
         kill -0 "$lock_pid" 2>/dev/null || reclaim_lock=1
     else
         now="$(date +%s 2>/dev/null || echo 0)"
-        lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+        lock_mtime="$(cat "$LOCK_TIME" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
         if echo "$now" "$lock_mtime" "$LOCK_STALE_AFTER" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$' &&
             [ "$now" -gt 0 ] &&
             [ "$lock_mtime" -gt 0 ] &&
@@ -99,10 +101,11 @@ take_lock() {
     fi
 
     if [ "$reclaim_lock" = "1" ]; then
-        rm -f "$LOCK_PID"
+        rm -f "$LOCK_PID" "$LOCK_TIME"
         rmdir "$LOCK_DIR" 2>/dev/null || true
         if mkdir "$LOCK_DIR" 2>/dev/null; then
             if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+                date +%s > "$LOCK_TIME" 2>/dev/null || true
                 LOCK_ACTIVE=1
                 trap 'release_lock' EXIT INT TERM
                 return 0

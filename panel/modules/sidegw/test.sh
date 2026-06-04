@@ -13,6 +13,7 @@ LAN_IF="${SIDEGW_LAN_IF:-br-lan}"
 MARK_SIDE="${SIDEGW_MARK_SIDE:-0x64}"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
 LOCK_PID="$LOCK_DIR/pid"
+LOCK_TIME="$LOCK_DIR/created"
 LOCK_STALE_AFTER="${SIDEGW_LOCK_STALE_AFTER:-300}"
 LOCK_HELD="${SIDEGW_LOCK_HELD:-0}"
 
@@ -28,13 +29,14 @@ release_lock() {
     [ "$LOCK_HELD" = "1" ] && return
     lock_pid="$(cat "$LOCK_PID" 2>/dev/null || echo)"
     [ "$lock_pid" = "$$" ] || return
-    rm -f "$LOCK_PID"
+    rm -f "$LOCK_PID" "$LOCK_TIME"
     rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
 take_lock() {
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+            date +%s > "$LOCK_TIME" 2>/dev/null || true
             trap 'release_lock' EXIT INT TERM
             return 0
         fi
@@ -48,7 +50,7 @@ take_lock() {
         kill -0 "$lock_pid" 2>/dev/null || reclaim_lock=1
     else
         now="$(date +%s 2>/dev/null || echo 0)"
-        lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+        lock_mtime="$(cat "$LOCK_TIME" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
         if echo "$now" "$lock_mtime" "$LOCK_STALE_AFTER" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$' &&
             [ "$now" -gt 0 ] &&
             [ "$lock_mtime" -gt 0 ] &&
@@ -58,10 +60,11 @@ take_lock() {
     fi
 
     if [ "$reclaim_lock" = "1" ]; then
-        rm -f "$LOCK_PID"
+        rm -f "$LOCK_PID" "$LOCK_TIME"
         rmdir "$LOCK_DIR" 2>/dev/null || true
         if mkdir "$LOCK_DIR" 2>/dev/null; then
             if echo "$$" > "$LOCK_PID" 2>/dev/null; then
+                date +%s > "$LOCK_TIME" 2>/dev/null || true
                 trap 'release_lock' EXIT INT TERM
                 return 0
             fi
@@ -116,6 +119,7 @@ if [ "$ENABLED" != "1" ]; then
 fi
 
 if [ "$MODE" = "all" ]; then
+    # all-LAN mode is too risky for automatic verification; disable and refuse.
     if ! disable_candidate; then
         echo "precheck rejected; cannot write disabled candidate config"
         exit 1

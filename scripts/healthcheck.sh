@@ -13,13 +13,38 @@ uname -a 2>/dev/null || true
 date 2>/dev/null || true
 
 echo "=== commands ==="
-for cmd in ip iptables uci uhttpd pidof; do
+for cmd in ip iptables uci uhttpd pidof nslookup wget stat; do
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "$cmd: ok"
     else
         echo "$cmd: missing"
     fi
 done
+
+echo "=== route capability probes ==="
+route_iif_log="/tmp/xiaomi-toolbox-route-iif.$$"
+if ip route get 8.8.8.8 iif br-lan >"$route_iif_log" 2>&1; then
+    echo "ip route get iif: ok"
+else
+    echo "ip route get iif: unavailable or failed"
+    cat "$route_iif_log" 2>/dev/null || true
+fi
+rm -f "$route_iif_log"
+
+route_mark_log="/tmp/xiaomi-toolbox-route-mark.$$"
+if ip route get 8.8.8.8 mark 0x64 >"$route_mark_log" 2>&1; then
+    echo "ip route get mark: ok"
+else
+    echo "ip route get mark: unavailable or failed"
+    cat "$route_mark_log" 2>/dev/null || true
+fi
+rm -f "$route_mark_log"
+
+if stat -c %Y /tmp >/dev/null 2>&1; then
+    echo "stat -c %Y: ok"
+else
+    echo "stat -c %Y: unavailable; sidegw lock fallback will use lock timestamp file"
+fi
 
 echo "=== lan ==="
 ip -4 addr show br-lan 2>/dev/null || true
