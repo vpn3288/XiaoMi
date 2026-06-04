@@ -40,6 +40,8 @@ bootloader
 
 `apply.sh`、`test.sh`、`rollback.sh` 和面板保存 / 预检 / 确认 / 关闭操作使用同一把 `/tmp` 锁，避免面板、cron 和 firewall include 并发修改规则；如果进程异常退出留下旧锁，后续执行会在确认锁持有进程不存在后接管。缺失或异常的锁 PID 会先按忙碌处理，只有锁目录已经明显过旧才会接管，避免刚创建锁但尚未写入 PID 的瞬间被误抢占。
 
+锁目录会额外写入 `created` 时间戳文件；旧锁回收会优先读取这个时间戳，只有缺失时才退回 `stat -c %Y`，以提高 BusyBox 精简环境下的兼容性。
+
 一键关闭只清理运行规则和待确认状态，不删除 `config.last_good`。上一次已验证配置仍可用于后续恢复或重新启用；cron / firewall include 会尊重当前关闭状态，不会仅因为 `config.last_good` 存在而自动重新启用。
 
 默认卸载会先关闭并清理 sidegw；如果选择保留配置，保存到 `config/sidegw.config` 的当前配置也会强制写为关闭状态，避免重装后自动重新启用。`config/sidegw.last_good` 只作为手动恢复材料保留。

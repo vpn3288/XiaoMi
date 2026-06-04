@@ -209,6 +209,7 @@ restore_install_failure() {
         fi
     fi
     if [ "$INSTALL_EXISTED" = "0" ]; then
+        log "Cleaning up failed first-time install: $INSTALL_DIR"
         rm -rf "$INSTALL_DIR/panel" 2>/dev/null || true
         rm -f "$INSTALL_DIR/toolbox-bootstrap.sh" "$INSTALL_DIR/config/toolbox.conf" "$INSTALL_DIR/$INSTALL_MARKER" 2>/dev/null || true
         rmdir "$INSTALL_DIR/config" "$INSTALL_DIR/log" "$INSTALL_DIR" 2>/dev/null || true

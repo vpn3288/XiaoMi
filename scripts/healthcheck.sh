@@ -6,6 +6,7 @@ SCRIPT_DIR="$(unset CDPATH; cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+TEST_ROUTE_IP="${XIAOMI_TOOLBOX_TEST_ROUTE_IP:-8.8.8.8}"
 [ "$#" -ge 2 ] && [ "$1" = "--install-dir" ] && INSTALL_DIR="$2"
 
 echo "=== system ==="
@@ -23,19 +24,19 @@ done
 
 echo "=== route capability probes ==="
 route_iif_log="/tmp/xiaomi-toolbox-route-iif.$$"
-if ip route get 8.8.8.8 iif br-lan >"$route_iif_log" 2>&1; then
-    echo "ip route get iif: ok"
+if ip route get "$TEST_ROUTE_IP" iif br-lan >"$route_iif_log" 2>&1; then
+    echo "ip route get iif: ok ($TEST_ROUTE_IP)"
 else
-    echo "ip route get iif: unavailable or failed"
+    echo "ip route get iif: unavailable or failed ($TEST_ROUTE_IP)"
     cat "$route_iif_log" 2>/dev/null || true
 fi
 rm -f "$route_iif_log"
 
 route_mark_log="/tmp/xiaomi-toolbox-route-mark.$$"
-if ip route get 8.8.8.8 mark 0x64 >"$route_mark_log" 2>&1; then
-    echo "ip route get mark: ok"
+if ip route get "$TEST_ROUTE_IP" mark 0x64 >"$route_mark_log" 2>&1; then
+    echo "ip route get mark: ok ($TEST_ROUTE_IP)"
 else
-    echo "ip route get mark: unavailable or failed"
+    echo "ip route get mark: unavailable or failed ($TEST_ROUTE_IP)"
     cat "$route_mark_log" 2>/dev/null || true
 fi
 rm -f "$route_mark_log"
