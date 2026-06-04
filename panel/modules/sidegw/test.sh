@@ -197,7 +197,7 @@ else
     echo "wget missing; router URL test skipped" >/tmp/sidegw-test-url.log
 fi
 
-if [ "$dns_ok" != "1" ] || [ "$gateway_ok" != "1" ] || [ "$route_ok" != "1" ] || [ "$rules_ok" != "1" ] || [ "$url_ok" != "1" ]; then
+if [ "$dns_ok" != "1" ] || [ "$gateway_ok" != "1" ] || [ "$route_ok" != "1" ] || [ "$rules_ok" != "1" ]; then
     if rollback; then
         echo "precheck failed; rolled back"
     else
@@ -242,6 +242,7 @@ rm -f "$rollback_conf"
 
 echo "precheck passed; rules are temporarily active for client confirmation"
 echo "dns_ok=$dns_ok gateway_ok=$gateway_ok route_ok=$route_ok rules_ok=$rules_ok url_ok=$url_ok"
+[ "$url_ok" = "1" ] || echo "router URL test failed but was ignored; verify from a matched client instead"
 [ -n "$route_note" ] && echo "$route_note"
 echo "Now test from a matched client, then click the panel confirmation button within 5 minutes:"
 echo "curl -4 http://ifconfig.me/ip"
