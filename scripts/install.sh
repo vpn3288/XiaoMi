@@ -168,13 +168,36 @@ keep_sidegw_applied_config="/tmp/xiaomi-toolbox-sidegw-applied-config.$$"
 keep_sidegw_pending_good="/tmp/xiaomi-toolbox-sidegw-pending-good.$$"
 keep_sidegw_pending_until="/tmp/xiaomi-toolbox-sidegw-pending-until.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-admin-token.$$"
+RESTORE_ON_FAIL=0
+panel_www_backup=""
+sidegw_backup=""
 
 cleanup_temp() {
     rm -f "$keep_sidegw_config" "$keep_sidegw_last_good" "$keep_sidegw_rules_state" \
         "$keep_sidegw_applied_config" "$keep_sidegw_pending_good" \
         "$keep_sidegw_pending_until" "$keep_admin_token"
 }
-trap cleanup_temp EXIT
+
+restore_install_failure() {
+    [ "$RESTORE_ON_FAIL" = "1" ] || return 0
+    if [ -n "$panel_www_backup" ] && [ -d "$panel_www_backup" ]; then
+        rm -rf "$INSTALL_DIR/panel/www" 2>/dev/null || true
+        mv "$panel_www_backup" "$INSTALL_DIR/panel/www" 2>/dev/null || true
+    fi
+    if [ -n "$sidegw_backup" ] && [ -d "$sidegw_backup" ]; then
+        rm -rf "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
+        mv "$sidegw_backup" "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
+    fi
+}
+
+on_exit() {
+    status="$?"
+    cleanup_temp
+    if [ "$status" -ne 0 ]; then
+        restore_install_failure
+    fi
+}
+trap on_exit EXIT
 
 restore_temp_file() {
     src="$1"
@@ -228,8 +251,16 @@ elif [ -f "$INSTALL_DIR/config/admin.token" ]; then
     cp "$INSTALL_DIR/config/admin.token" "$keep_admin_token" || die "cannot preserve admin token"
 fi
 
-backup_path_move "$INSTALL_DIR/panel/www"
-backup_path_move "$INSTALL_DIR/panel/modules/sidegw"
+if [ -e "$INSTALL_DIR/panel/www" ]; then
+    panel_www_backup="$INSTALL_DIR/panel/www.bak-$(date +%Y%m%d-%H%M%S 2>/dev/null || echo now)-$$"
+    mv "$INSTALL_DIR/panel/www" "$panel_www_backup" || die "cannot move backup $INSTALL_DIR/panel/www"
+    RESTORE_ON_FAIL=1
+fi
+if [ -e "$INSTALL_DIR/panel/modules/sidegw" ]; then
+    sidegw_backup="$INSTALL_DIR/panel/modules/sidegw.bak-$(date +%Y%m%d-%H%M%S 2>/dev/null || echo now)-$$"
+    mv "$INSTALL_DIR/panel/modules/sidegw" "$sidegw_backup" || die "cannot move backup $INSTALL_DIR/panel/modules/sidegw"
+    RESTORE_ON_FAIL=1
+fi
 backup_file "$INSTALL_DIR/config/toolbox.conf"
 backup_file "$INSTALL_DIR/toolbox-bootstrap.sh"
 
@@ -243,6 +274,9 @@ chmod +x "$INSTALL_DIR/panel/www/cgi-bin/"*.cgi 2>/dev/null || true
 chmod +x "$INSTALL_DIR/panel/modules/sidegw/"*.sh 2>/dev/null || true
 [ -s "$INSTALL_DIR/panel/www/index.html" ] || die "panel index missing after copy"
 [ -x "$INSTALL_DIR/panel/www/cgi-bin/sidegw.cgi" ] || die "panel cgi missing or not executable after copy"
+[ -x "$INSTALL_DIR/panel/modules/sidegw/apply.sh" ] || die "sidegw apply script missing or not executable after copy"
+[ -x "$INSTALL_DIR/panel/modules/sidegw/test.sh" ] || die "sidegw test script missing or not executable after copy"
+[ -x "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" ] || die "sidegw rollback script missing or not executable after copy"
 
 cat > "$INSTALL_DIR/config/toolbox.conf" <<EOF
 INSTALL_DIR='$INSTALL_DIR'
@@ -411,6 +445,7 @@ if [ "$AUTOSTART" = "1" ]; then
 fi
 
 "$INSTALL_DIR/toolbox-bootstrap.sh" || die "failed to start toolbox panel"
+RESTORE_ON_FAIL=0
 
 log "Installed."
 log "Open: http://$HOST:$PORT/cgi-bin/sidegw.cgi"

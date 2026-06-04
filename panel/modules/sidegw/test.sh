@@ -214,9 +214,15 @@ if [ "$dns_ok" != "1" ] || [ "$gateway_ok" != "1" ] || [ "$route_ok" != "1" ] ||
     exit 2
 fi
 
-cp "$CONF" "$PENDING_GOOD"
 now="$(date +%s 2>/dev/null || echo 0)"
-echo $((now + 300)) > "$PENDING_UNTIL"
+if ! cp "$CONF" "$PENDING_GOOD" || ! echo $((now + 300)) > "$PENDING_UNTIL"; then
+    if rollback; then
+        echo "precheck state write failed; rolled back"
+    else
+        echo "precheck state write failed; rollback also failed"
+    fi
+    exit 1
+fi
 rm -f "$rollback_conf"
 
 (

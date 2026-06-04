@@ -33,8 +33,12 @@ docs/second-round-change-summary.md
 14. toolbox.conf、toolbox-bootstrap.sh 写入和 chmod 增加失败检查。
 15. cron 更新修正 grep -v 空输出误判，保留真实读写错误中止。
 16. uhttpd 端口占用检测改为匹配监听地址端口结尾，降低端口子串误判。
-17. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
-18. README 补充 dry-run 检查范围、服务端动作确认、JS 要求、install.sh --uninstall 和静态检查命令。
+17. 安装失败时尽量恢复被移走的旧 panel/www 和 sidegw 模块目录。
+18. 安装完成前校验 apply.sh、test.sh、rollback.sh 可执行。
+19. test.sh 写待确认/自动回滚标记失败时立即回滚并失败退出。
+20. rollback.sh 写关闭配置或替换配置失败时硬失败，避免假成功。
+21. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
+22. README 补充 dry-run 检查范围、服务端动作确认、JS 要求、install.sh --uninstall 和静态检查命令。
 ```
 
 ## 安全措施
@@ -67,6 +71,10 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 10. 旧版 sidegw-panel 禁用失败静默继续：已修改。
 11. crontab grep -v 空输出误判：已修改。
 12. toolbox.conf/bootstrap heredoc 写入未检查：已修改。
+13. 安装失败可能移走旧恢复工具：已修改，失败时尝试恢复旧目录。
+14. sidegw 核心脚本可执行性未检查：已修改。
+15. test.sh 预检成功后 pending 写入未检查：已修改。
+16. rollback.sh 配置写入失败可能假成功：已修改。
 
 建议修改：
 1. netstat preflight：已加入。

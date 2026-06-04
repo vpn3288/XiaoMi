@@ -61,14 +61,25 @@ if [ "$LOCK_HELD" != "1" ]; then
     fi
 fi
 
-[ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+[ -f "$CONF" ] || cp "$BASE/config.default" "$CONF" || {
+    echo "rollback failed; cannot initialize sidegw config" >&2
+    exit 1
+}
 
 tmp="$CONF.tmp.$$"
 {
     echo "ENABLED='0'"
     grep -v "^[[:space:]]*ENABLED=" "$CONF"
-} > "$tmp"
-mv "$tmp" "$CONF"
+} > "$tmp" || {
+    rm -f "$tmp"
+    echo "rollback failed; cannot write disabled sidegw config" >&2
+    exit 1
+}
+mv "$tmp" "$CONF" || {
+    rm -f "$tmp"
+    echo "rollback failed; cannot replace sidegw config" >&2
+    exit 1
+}
 
 SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" || {
     echo "rollback failed; sidegw rules may still be active" >&2
