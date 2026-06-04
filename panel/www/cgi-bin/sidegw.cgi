@@ -32,6 +32,29 @@ admin_token() {
     cat "$ADMIN_TOKEN_FILE" 2>/dev/null
 }
 
+valid_admin_token() {
+    echo "$1" | grep -Eq '^[A-Za-z0-9._-]{6,64}$'
+}
+
+write_admin_token_value() {
+    value="$1"
+    tmp="$ADMIN_TOKEN_FILE.tmp.$$"
+    old_umask="$(umask)"
+    umask 077
+    if ! printf '%s\n' "$value" > "$tmp"; then
+        umask "$old_umask"
+        return 1
+    fi
+    chmod 600 "$tmp" 2>/dev/null || true
+    if ! mv "$tmp" "$ADMIN_TOKEN_FILE"; then
+        rm -f "$tmp"
+        umask "$old_umask"
+        return 1
+    fi
+    umask "$old_umask"
+    return 0
+}
+
 authorized() {
     posted="$1"
     server="$(admin_token)"
@@ -164,6 +187,20 @@ clean_macs() {
         xargs
 }
 
+filter_words() {
+    values="$1"
+    removes="$2"
+    out=""
+    for item in $values; do
+        skip=0
+        for remove in $removes; do
+            [ "$item" = "$remove" ] && skip=1
+        done
+        [ "$skip" = "0" ] && out="${out}${out:+ }$item"
+    done
+    printf '%s\n' "$out"
+}
+
 clean_cidr() {
     v="$(printf '%s' "$1" | tr -cd '0-9./')"
     echo "$v" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' || {
@@ -186,15 +223,16 @@ html_escape() {
     sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
 }
 
-write_config() {
-    enabled="$1"
-    mode="$2"
-    gateway="$3"
-    lan_cidr="$4"
-    side_ips="$5"
-    side_macs="$6"
-    direct_ips="$7"
-    direct_macs="$8"
+write_config_file() {
+    dst="$1"
+    enabled="$2"
+    mode="$3"
+    gateway="$4"
+    lan_cidr="$5"
+    side_ips="$6"
+    side_macs="$7"
+    direct_ips="$8"
+    direct_macs="$9"
     mkdir -p "$BASE"
     {
         echo "ENABLED='$enabled'"
@@ -205,13 +243,38 @@ write_config() {
         echo "SIDE_MACS='$side_macs'"
         echo "DIRECT_IPS='$direct_ips'"
         echo "DIRECT_MACS='$direct_macs'"
-    } > "$CONF"
+    } > "$dst"
+}
+
+write_config() {
+    write_config_file "$CONF" "$@"
+}
+
+remove_entries_from_config_file() {
+    target="$1"
+    remove_ips="$2"
+    remove_macs="$3"
+    [ -f "$target" ] || return 0
+    ENABLED="0"
+    MODE="list"
+    GATEWAY=""
+    LAN_CIDR="192.168.31.0/24"
+    SIDE_IPS=""
+    SIDE_MACS=""
+    DIRECT_IPS=""
+    DIRECT_MACS=""
+    . "$target" 2>/dev/null || return 0
+    [ "$MODE" = "all" ] || MODE="list"
+    SIDE_IPS="$(filter_words "${SIDE_IPS:-}" "$remove_ips")"
+    DIRECT_IPS="$(filter_words "${DIRECT_IPS:-}" "$remove_ips")"
+    SIDE_MACS="$(filter_words "${SIDE_MACS:-}" "$remove_macs")"
+    DIRECT_MACS="$(filter_words "${DIRECT_MACS:-}" "$remove_macs")"
+    write_config_file "$target" "${ENABLED:-0}" "$MODE" "${GATEWAY:-}" "${LAN_CIDR:-192.168.31.0/24}" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
 }
 
 MSG=""
 ACTION=""
 POST_DATA=""
-VIEW_AUTH=0
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
 QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
 
@@ -226,7 +289,6 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     elif ! authorized "$(param admin_token)"; then
         MSG="管理口令不正确，已拒绝本次操作。"
     else
-        VIEW_AUTH=1
         ENABLED="$(param enabled)"
         [ "$ENABLED" = "1" ] || ENABLED="0"
         MODE="$(param mode)"
@@ -239,7 +301,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         DIRECT_MACS="$(clean_macs "$(url_decode "$(param direct_macs)")")"
 
         case "$ACTION" in
-            save|test|confirm|disable)
+            save|test|confirm|disable|delete_rules|remove_entries)
                 if ! take_lock; then
                     MSG="sidegw 正忙，另一个应用、预检、确认或回滚正在运行。请稍后重试。"
                     ACTION=""
@@ -286,49 +348,72 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
             disable)
                 MSG="$(SIDEGW_LOCK_HELD=1 "$BASE/rollback.sh" 2>&1)"
                 ;;
+            remove_entries)
+                REMOVE_IPS="$(clean_ips "$(url_decode "$(param remove_ips)")")"
+                REMOVE_MACS="$(clean_macs "$(url_decode "$(param remove_macs)")")"
+                if [ -z "$REMOVE_IPS" ] && [ -z "$REMOVE_MACS" ]; then
+                    MSG="没有填写要删除的 IP 或 MAC。"
+                else
+                    . "$CONF"
+                    ENABLED="${ENABLED:-0}"
+                    MODE="${MODE:-list}"
+                    [ "$MODE" = "all" ] || MODE="list"
+                    GATEWAY="${GATEWAY:-}"
+                    LAN_CIDR="${LAN_CIDR:-192.168.31.0/24}"
+                    SIDE_IPS="$(filter_words "${SIDE_IPS:-}" "$REMOVE_IPS")"
+                    DIRECT_IPS="$(filter_words "${DIRECT_IPS:-}" "$REMOVE_IPS")"
+                    SIDE_MACS="$(filter_words "${SIDE_MACS:-}" "$REMOVE_MACS")"
+                    DIRECT_MACS="$(filter_words "${DIRECT_MACS:-}" "$REMOVE_MACS")"
+                    write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
+                    remove_entries_from_config_file "$BASE/config.last_good" "$REMOVE_IPS" "$REMOVE_MACS"
+                    remove_entries_from_config_file "$BASE/config.pending_good" "$REMOVE_IPS" "$REMOVE_MACS"
+                    if REMOVE_CLEANUP="$(SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" 2>&1)"; then
+                        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                        MSG="已删除匹配的配置条目，并清理当前运行规则。"
+                    else
+                        MSG="已删除匹配的配置条目，但清理当前运行规则失败；待确认回滚标记已保留。输出：$REMOVE_CLEANUP"
+                    fi
+                fi
+                ;;
+            delete_rules)
+                if DELETE_OUTPUT="$(SIDEGW_LOCK_HELD=1 "$BASE/rollback.sh" 2>&1)"; then
+                    MSG="已删除所有 sidegw 运行规则，并已关闭当前配置。"
+                    [ -n "$DELETE_OUTPUT" ] && MSG="$MSG 输出：$DELETE_OUTPUT"
+                else
+                    MSG="删除规则失败，输出：$DELETE_OUTPUT"
+                fi
+                ;;
+            change_token)
+                NEW_ADMIN_TOKEN="$(param new_admin_token)"
+                NEW_ADMIN_TOKEN_CONFIRM="$(param new_admin_token_confirm)"
+                if [ -z "$NEW_ADMIN_TOKEN" ]; then
+                    MSG="新管理口令不能为空。"
+                elif [ "$NEW_ADMIN_TOKEN" != "$NEW_ADMIN_TOKEN_CONFIRM" ]; then
+                    MSG="两次输入的新管理口令不一致。"
+                elif ! valid_admin_token "$NEW_ADMIN_TOKEN"; then
+                    MSG="新管理口令格式不正确。请使用 6-64 位字母、数字、点、下划线或短横线。"
+                elif write_admin_token_value "$NEW_ADMIN_TOKEN"; then
+                    MSG="管理口令已更新。下一次操作请使用新口令。"
+                else
+                    MSG="管理口令更新失败，请检查安装目录是否可写。"
+                fi
+                ;;
         esac
     fi
 fi
 
 if [ "$QUERY_ACTION" = "diagnose" ]; then
-    TOKEN_HINT_SAFE="管理口令"
-    if [ "$REQUEST_METHOD" = "POST" ] && authorized "$(param admin_token)"; then
-        DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
-        cat <<EOF
+    DIAG="$("$BASE/diagnose.sh" 2>&1 | html_escape)"
+    cat <<EOF
 Content-Type: text/html; charset=utf-8
 
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>诊断</title><link rel="stylesheet" href="/assets/style.css"></head><body><aside><div class="brand">小米路由工具箱</div><nav><a href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a class="active" href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside><main><section class="card"><h1>诊断输出</h1><pre>$DIAG</pre></section></main></body></html>
 EOF
-    else
-        cat <<EOF
-Content-Type: text/html; charset=utf-8
-
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>诊断</title><link rel="stylesheet" href="/assets/style.css"></head><body><aside><div class="brand">小米路由工具箱</div><nav><a href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a class="active" href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside><main><section class="card"><h1>诊断</h1><form method="post" action="/cgi-bin/sidegw.cgi?action=diagnose"><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"><div class="actions"><button name="action" value="diagnose">查看诊断</button></div></form></section></main></body></html>
-EOF
-    fi
     exit 0
 fi
 
 MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
 TOKEN_HINT_SAFE="管理口令"
-if [ "$VIEW_AUTH" != "1" ]; then
-    cat <<EOF
-Content-Type: text/html; charset=utf-8
-
-<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sidegw 指定 IP 分流</title><link rel="stylesheet" href="/assets/style.css"></head>
-<body>
-<aside><div class="brand">小米路由工具箱</div><nav><a class="active" href="/cgi-bin/sidegw.cgi">sidegw 指定 IP 分流</a><a href="/cgi-bin/sidegw.cgi?action=diagnose">诊断</a></nav></aside>
-<main>
-<section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><form method="post" action="/cgi-bin/sidegw.cgi"><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"><div class="actions"><button name="action" value="view">查看当前配置</button></div></form></section>
-<section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
-</main>
-</body>
-</html>
-EOF
-    exit 0
-fi
 
 . "$CONF"
 ENABLED="${ENABLED:-0}"
@@ -385,8 +470,13 @@ Content-Type: text/html; charset=utf-8
 <main>
 <section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP_SAFE</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP_SAFE</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY_SAFE</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
 <form method="post" action="/cgi-bin/sidegw.cgi">
-<section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div><div><label>管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div></div><p>待确认状态：$PENDING_STATUS_SAFE</p></section>
-<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="confirm">确认客户端正常并持久化</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
+<section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div><p>待确认状态：$PENDING_STATUS_SAFE</p></section>
+<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="grid"><div><label>当前管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div></div><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><button name="action" value="confirm">确认客户端正常并持久化</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
+<section class="card"><h2>删除配置条目</h2><div class="grid"><div><label>删除 IP</label><textarea name="remove_ips"></textarea></div><div><label>删除 MAC</label><textarea name="remove_macs"></textarea></div></div><div class="actions"><button name="action" value="remove_entries">删除配置条目</button></div></section>
+<section class="card"><h2>删除所有规则</h2><div class="actions"><button name="action" value="delete_rules" class="danger">删除所有规则</button></div></section>
+</form>
+<form method="post" action="/cgi-bin/sidegw.cgi">
+<section class="card"><h2>修改管理口令</h2><div class="grid"><div><label>当前管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div><div><label>新管理口令</label><input name="new_admin_token" type="password" autocomplete="new-password" placeholder="6-64 位"></div><div><label>再次输入新口令</label><input name="new_admin_token_confirm" type="password" autocomplete="new-password" placeholder="再次输入"></div></div><div class="actions"><button name="action" value="change_token">更新管理口令</button></div></section>
 </form>
 <section class="card"><h2>执行结果</h2><pre>$MSG_SAFE</pre></section>
 <section class="card"><h2>当前规则</h2><label>ip rule</label><pre>$RULES</pre><label>table 100</label><pre>$ROUTES</pre><label>FORWARD</label><pre>$FWD</pre><label>DNS</label><pre>$DNS</pre></section>

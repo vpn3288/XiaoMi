@@ -9,6 +9,7 @@ HOST="$DEFAULT_HOST"
 PORT="$DEFAULT_PORT"
 DRY_RUN=0
 AUTOSTART=1
+ADMIN_TOKEN=""
 
 generate_admin_token() {
     token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
@@ -17,6 +18,23 @@ generate_admin_token() {
     else
         printf '%s%s\n' "$(date +%s 2>/dev/null || echo now)" "$$"
     fi
+}
+
+valid_admin_token() {
+    echo "$1" | grep -Eq '^[A-Za-z0-9._-]{6,64}$'
+}
+
+write_admin_token() {
+    dst="$1"
+    value="$2"
+    old_umask="$(umask)"
+    umask 077
+    if ! printf '%s\n' "$value" > "$dst"; then
+        umask "$old_umask"
+        return 1
+    fi
+    chmod 600 "$dst" 2>/dev/null || true
+    umask "$old_umask"
 }
 
 copy_disabled_config() {
@@ -40,6 +58,7 @@ Options:
   --install-dir PATH     Install directory, default: $DEFAULT_INSTALL_DIR
   --host IP              Panel listen IP, default: $DEFAULT_HOST
   --port PORT            Panel port, default: $DEFAULT_PORT
+  --admin-token TOKEN    Set panel management token, 6-64 chars: A-Z a-z 0-9 . _ -
   --no-autostart         Do not register cron/firewall autostart
   --help                 Show this help
 
@@ -54,6 +73,7 @@ while [ "$#" -gt 0 ]; do
         --install-dir) shift; [ "$#" -gt 0 ] || die "--install-dir requires PATH"; INSTALL_DIR="$1" ;;
         --host) shift; [ "$#" -gt 0 ] || die "--host requires IP"; HOST="$1" ;;
         --port) shift; [ "$#" -gt 0 ] || die "--port requires PORT"; PORT="$1" ;;
+        --admin-token) shift; [ "$#" -gt 0 ] || die "--admin-token requires TOKEN"; ADMIN_TOKEN="$1" ;;
         --no-autostart) AUTOSTART=0 ;;
         --help|-h) usage; exit 0 ;;
         *) die "unknown option: $1" ;;
@@ -65,9 +85,10 @@ is_ipv4 "$HOST" || die "invalid host IP: $HOST"
 echo "$PORT" | grep -Eq '^[0-9]{1,5}$' || die "invalid port: $PORT"
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "invalid port: $PORT"
 is_safe_install_dir "$INSTALL_DIR" || die "unsafe install dir: $INSTALL_DIR"
+[ -z "$ADMIN_TOKEN" ] || valid_admin_token "$ADMIN_TOKEN" || die "invalid admin token; use 6-64 chars: A-Z a-z 0-9 . _ -"
 
 log "Install dir: $INSTALL_DIR"
-log "Panel URL: http://$HOST:$PORT/"
+log "Panel URL: http://$HOST:$PORT/cgi-bin/sidegw.cgi"
 log "Dry run: $DRY_RUN"
 log "Autostart: $AUTOSTART"
 
@@ -140,8 +161,11 @@ mkdir -p "$INSTALL_DIR/panel/www" "$INSTALL_DIR/panel/modules"
 cp -R "$SCRIPT_DIR/../panel/www/." "$INSTALL_DIR/panel/www/"
 mkdir -p "$INSTALL_DIR/panel/modules/sidegw"
 cp -R "$SCRIPT_DIR/../panel/modules/sidegw/." "$INSTALL_DIR/panel/modules/sidegw/"
+chmod -R a+rX "$INSTALL_DIR/panel/www" "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/panel/www/cgi-bin/"*.cgi 2>/dev/null || true
 chmod +x "$INSTALL_DIR/panel/modules/sidegw/"*.sh 2>/dev/null || true
+[ -s "$INSTALL_DIR/panel/www/index.html" ] || die "panel index missing after copy"
+[ -x "$INSTALL_DIR/panel/www/cgi-bin/sidegw.cgi" ] || die "panel cgi missing or not executable after copy"
 
 cat > "$INSTALL_DIR/config/toolbox.conf" <<EOF
 INSTALL_DIR='$INSTALL_DIR'
@@ -172,6 +196,34 @@ find_toolbox_uhttpd() {
         esac
     done
     return 1
+}
+
+find_port_uhttpd() {
+    netstat -lntp 2>/dev/null |
+        awk -v port=":\$PORT" '\$0 ~ port && \$0 ~ /LISTEN/ && \$0 ~ /uhttpd/ {
+            split(\$NF, p, "/")
+            if (p[1] ~ /^[0-9]+$/) {
+                print p[1]
+                exit
+            }
+        }'
+}
+
+stop_replaceable_port_uhttpd() {
+    port_pid="\$(find_port_uhttpd)"
+    [ -n "\$port_pid" ] || return 0
+    cmdline="\$(tr '\000' ' ' < "/proc/\$port_pid/cmdline" 2>/dev/null)"
+    case "\$cmdline" in
+        *xiaomi*toolbox*|*XiaoMi*|*sidegw*|*"\$INSTALL_DIR"*)
+            kill "\$port_pid" 2>/dev/null || true
+            sleep 1
+            kill -0 "\$port_pid" 2>/dev/null && kill -9 "\$port_pid" 2>/dev/null || true
+            ;;
+        *)
+            echo "port \$HOST:\$PORT is already used by PID \$port_pid: \$cmdline" >&2
+            return 1
+            ;;
+    esac
 }
 
 sidegw_config_enabled() {
@@ -207,9 +259,14 @@ if [ -n "\$running_pid" ] && kill -0 "\$running_pid" 2>/dev/null; then
     echo "\$running_pid" > "\$PID_FILE"
     :
 else
-    "\$UHTTPD_BIN" -p "\$HOST:\$PORT" -h "\$INSTALL_DIR/panel/www" -x /cgi-bin -t 60 -T 30 -D
+    stop_replaceable_port_uhttpd || exit 1
+    "\$UHTTPD_BIN" -p "\$HOST:\$PORT" -h "\$INSTALL_DIR/panel/www" -I index.html -x /cgi-bin -t 60 -T 30 -D
     sleep 1
-    find_toolbox_uhttpd > "\$PID_FILE" 2>/dev/null || rm -f "\$PID_FILE"
+    if ! find_toolbox_uhttpd > "\$PID_FILE" 2>/dev/null; then
+        rm -f "\$PID_FILE"
+        echo "failed to start toolbox uhttpd on \$HOST:\$PORT" >&2
+        exit 1
+    fi
 fi
 EOF
 chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh"
@@ -234,16 +291,14 @@ fi
 if [ -f "$keep_sidegw_pending_until" ]; then
     mv "$keep_sidegw_pending_until" "$INSTALL_DIR/panel/modules/sidegw/config.pending_until"
 fi
-if [ -f "$keep_admin_token" ]; then
+if [ -n "$ADMIN_TOKEN" ]; then
+    write_admin_token "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$ADMIN_TOKEN" || die "cannot write admin token"
+elif [ -f "$keep_admin_token" ]; then
     mv "$keep_admin_token" "$INSTALL_DIR/panel/modules/sidegw/admin.token"
     chmod 600 "$INSTALL_DIR/panel/modules/sidegw/admin.token" 2>/dev/null || true
 fi
 if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
-    old_umask="$(umask)"
-    umask 077
-    generate_admin_token > "$INSTALL_DIR/panel/modules/sidegw/admin.token" || die "cannot write admin token"
-    chmod 600 "$INSTALL_DIR/panel/modules/sidegw/admin.token" 2>/dev/null || true
-    umask "$old_umask"
+    write_admin_token "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$(generate_admin_token)" || die "cannot write admin token"
 fi
 
 if [ "$AUTOSTART" = "1" ]; then
@@ -261,10 +316,11 @@ if [ "$AUTOSTART" = "1" ]; then
     uci commit firewall
 fi
 
-"$INSTALL_DIR/toolbox-bootstrap.sh"
+"$INSTALL_DIR/toolbox-bootstrap.sh" || die "failed to start toolbox panel"
 
 log "Installed."
-log "Open: http://$HOST:$PORT/"
+log "Open: http://$HOST:$PORT/cgi-bin/sidegw.cgi"
+log "Home: http://$HOST:$PORT/"
 log "Panel management token: $(cat "$INSTALL_DIR/panel/modules/sidegw/admin.token")"
 log "Keep this token. The panel requires it for save/apply/confirm/disable actions."
 log "sidegw is installed but remains disabled until you enable it in the panel."

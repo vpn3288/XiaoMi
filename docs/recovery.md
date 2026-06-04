@@ -16,7 +16,7 @@ http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 一键关闭
 ```
 
-面板会先要求输入管理口令。一键关闭会保留上一次已验证配置 `config.last_good`，但 cron / firewall include 会尊重当前关闭状态，不会自动重新启用。
+先在主表单的当前管理口令框填入口令，再点击一键关闭。一键关闭会保留上一次已验证配置 `config.last_good`，但 cron / firewall include 会尊重当前关闭状态，不会自动重新启用。
 
 ## 方法二：SSH 关闭
 

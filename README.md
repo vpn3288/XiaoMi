@@ -43,29 +43,35 @@ sidegw 指定 IP / MAC 分流
 
 ## 直接复制安装
 
-SSH 登录小米路由器后，整段复制执行：
+SSH 登录小米万兆路由器后，整段复制执行即可。它会先尝试安装基础依赖，再从 GitHub 下载最新版并安装：
 
 ```sh
 cd /tmp
+
+if command -v opkg >/dev/null 2>&1; then
+  opkg update
+  opkg install wget ca-bundle ca-certificates tar gzip uhttpd iptables ip-full 2>/dev/null || true
+fi
+
 rm -rf XiaoMi-main XiaoMi-main.tar.gz
-wget -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
+
+if command -v wget >/dev/null 2>&1; then
+  wget -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz ||
+    wget --no-check-certificate -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
+elif command -v curl >/dev/null 2>&1; then
+  curl -L -o XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
+else
+  echo "缺少 wget/curl，且无法自动下载 GitHub 安装包"
+  exit 1
+fi
+
 tar -xzf XiaoMi-main.tar.gz
 cd XiaoMi-main
 sh scripts/install.sh --dry-run
 sh scripts/install.sh
 ```
 
-如果 `wget` 提示证书错误，改用这一段：
-
-```sh
-cd /tmp
-rm -rf XiaoMi-main XiaoMi-main.tar.gz
-wget --no-check-certificate -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
-tar -xzf XiaoMi-main.tar.gz
-cd XiaoMi-main
-sh scripts/install.sh --dry-run
-sh scripts/install.sh
-```
+有些小米固件已经内置了这些命令，`opkg install` 显示个别包不存在不一定代表失败；最后以 `sh scripts/install.sh --dry-run` 的检查结果为准。
 
 默认安装位置：
 
@@ -76,7 +82,7 @@ sh scripts/install.sh
 默认面板地址：
 
 ```text
-http://192.168.31.1:8888/
+http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 ```
 
 安装成功后，SSH 输出里会看到：
@@ -122,7 +128,7 @@ sh scripts/install.sh --install-dir /mnt/sda1/xiaomi_router/toolbox --host 192.1
 http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 ```
 
-第一次查看配置也需要输入管理口令。
+面板会直接显示当前配置和诊断信息。执行保存、预检、确认持久化、删除或关闭时，在“确认客户端正常并持久化”旁边的当前管理口令框填入安装时显示的 Panel management token。
 
 ## 新手推荐填写
 
@@ -136,7 +142,7 @@ LAN 网段：192.168.31.0/24
 直连 IP：留空，或填不想走旁路由的 IP
 走旁路由 MAC：先留空
 直连 MAC：先留空
-管理口令：填安装时显示的 Panel management token
+当前管理口令：执行操作前填安装时显示的 Panel management token
 ```
 
 然后按这个顺序点：
@@ -182,6 +188,8 @@ curl -4 ifconfig.me
 ```text
 一键关闭
 ```
+
+点击前先在主表单的当前管理口令框填入管理口令。
 
 如果面板打不开，就 SSH 到小米路由器执行：
 
@@ -231,7 +239,7 @@ sidegw 详细诊断：
 http://192.168.31.1:8888/cgi-bin/sidegw.cgi?action=diagnose
 ```
 
-诊断页同样需要管理口令。不要把诊断输出直接发到公开地方，因为里面可能包含你的内网 IP、路由规则和防火墙规则。
+诊断页会直接显示诊断输出。不要把诊断输出直接发到公开地方，因为里面可能包含你的内网 IP、路由规则和防火墙规则。
 
 ## 卸载
 
