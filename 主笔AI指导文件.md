@@ -3,6 +3,10 @@
 适用项目：小米万兆路由器 Web 工具面板  
 当前首个功能：`sidegw 指定 IP / MAC 分流`  
 主笔 AI：负责需求拆解、架构设计、脚本编写、页面实现、测试方案和版本迭代。
+让你当主笔，然后在本地WSL安装创建claude code和opencode和codex三个审查者AI。使用claudecode的claude4.6和opencode的免费deepseek flash free以及codex的gpt5.5作为审查者AI。每次你把安装脚本发给三个审查者AI，并且给与三个审查者AI关于审查的指导文件，让他们按照审查指导文件审查脚本。然后你根据三方AI审查意见和主笔AI的主笔指导文件进行脚本完善。尽量的抄1panle的页面和openwrt的IP分流功能，并且把他们优化成傻瓜式操作，适合新手操作的面板。这一步很重要，如果你忘记了claudecode，opencode，codexAPIkey,必须问我要。https://raw.githubusercontent.com/vpn3288/XiaoMi/refs/heads/main/%E4%B8%BB%E7%AC%94AI%E6%8C%87%E5%AF%BC%E6%96%87%E4%BB%B6.md这个是你的主笔AI指导文件。
+https://raw.githubusercontent.com/vpn3288/XiaoMi/refs/heads/main/%E5%AE%A1%E6%9F%A5%E8%80%85AI%E6%8C%87%E5%AF%BC%E6%96%87%E4%BB%B6.md这个是你要给三个审查者AI审查脚本的指导文件。
+
+
 
 ## 1. 项目目标
 
