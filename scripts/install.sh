@@ -58,11 +58,15 @@ disable_legacy_sidegw_panel() {
         esac
         seen_legacy="$seen_legacy $legacy_base"
         if [ -f "$legacy_base/config/sidegw.conf" ]; then
-            copy_disabled_config "$legacy_base/config/sidegw.conf" "$legacy_base/config/sidegw.conf.tmp.$$" &&
-                mv "$legacy_base/config/sidegw.conf.tmp.$$" "$legacy_base/config/sidegw.conf"
+            legacy_tmp="$legacy_base/config/sidegw.conf.tmp.$$"
+            copy_disabled_config "$legacy_base/config/sidegw.conf" "$legacy_tmp" ||
+                die "cannot disable legacy sidegw config: $legacy_base"
+            mv "$legacy_tmp" "$legacy_base/config/sidegw.conf" ||
+                die "cannot replace legacy sidegw config: $legacy_base"
         fi
         if [ -f "$legacy_base/bin/sidegw-panel-start.sh" ]; then
-            chmod a-x "$legacy_base/bin/sidegw-panel-start.sh" 2>/dev/null || true
+            chmod a-x "$legacy_base/bin/sidegw-panel-start.sh" 2>/dev/null ||
+                die "cannot disable legacy sidegw start script: $legacy_base"
         fi
         log "Disabled legacy sidegw panel: $legacy_base"
     done
@@ -245,6 +249,7 @@ INSTALL_DIR='$INSTALL_DIR'
 HOST='$HOST'
 PORT='$PORT'
 EOF
+[ -s "$INSTALL_DIR/config/toolbox.conf" ] || die "cannot write toolbox config"
 
 UHTTPD_BIN="$(command -v uhttpd)"
 cat > "$INSTALL_DIR/toolbox-bootstrap.sh" <<EOF
@@ -273,7 +278,7 @@ find_toolbox_uhttpd() {
 
 find_port_uhttpd() {
     netstat -lntp 2>/dev/null |
-        awk -v port=":\$PORT" '\$0 ~ port && \$0 ~ /LISTEN/ && \$0 ~ /uhttpd/ {
+        awk -v listen=":\$PORT" '\$0 ~ /LISTEN/ && \$0 ~ /uhttpd/ && \$4 ~ listen "\$" {
             split(\$NF, p, "/")
             if (p[1] ~ /^[0-9]+$/) {
                 print p[1]
@@ -342,7 +347,8 @@ else
     fi
 fi
 EOF
-chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh"
+[ -s "$INSTALL_DIR/toolbox-bootstrap.sh" ] || die "cannot write toolbox bootstrap"
+chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh" || die "cannot make toolbox bootstrap executable"
 
 if [ -f "$keep_sidegw_config" ]; then
     if [ -f "$keep_sidegw_last_good" ] || [ -f "$keep_sidegw_pending_good" ]; then
@@ -384,7 +390,9 @@ if [ "$AUTOSTART" = "1" ]; then
     backup_file /etc/crontabs/root
     cron_tmp="/tmp/xiaomi-toolbox-cron.$$"
     if [ -f /etc/crontabs/root ]; then
-        grep -v "$CRON_MARK" /etc/crontabs/root > "$cron_tmp" || die "cannot prepare crontab update"
+        grep -v "$CRON_MARK" /etc/crontabs/root > "$cron_tmp"
+        grep_status="$?"
+        [ "$grep_status" -le 1 ] || die "cannot prepare crontab update"
     else
         : > "$cron_tmp" || die "cannot prepare crontab update"
     fi

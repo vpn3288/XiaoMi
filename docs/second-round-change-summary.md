@@ -29,8 +29,12 @@ docs/second-round-change-summary.md
 10. 诊断页、当前配置和规则详情改为需要管理口令后查看。
 11. change_token 增加服务端动作确认。
 12. cron/firewall autostart 写入增加失败中止。
-13. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
-14. README 补充 dry-run 检查范围、服务端动作确认、JS 要求、install.sh --uninstall 和静态检查命令。
+13. 禁用旧版 sidegw-panel 失败时中止安装，避免旧规则重建器继续运行。
+14. toolbox.conf、toolbox-bootstrap.sh 写入和 chmod 增加失败检查。
+15. cron 更新修正 grep -v 空输出误判，保留真实读写错误中止。
+16. uhttpd 端口占用检测改为匹配监听地址端口结尾，降低端口子串误判。
+17. 新增 tests/shellcheck/run.sh，默认统一执行 sh -n；设置 RUN_SHELLCHECK=1 时追加 shellcheck。
+18. README 补充 dry-run 检查范围、服务端动作确认、JS 要求、install.sh --uninstall 和静态检查命令。
 ```
 
 ## 安全措施
@@ -60,6 +64,9 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 7. 匿名诊断/规则详情泄露：已修改。
 8. change_token 缺少二次确认：已修改。
 9. cron/firewall 写入失败未中止：已修改。
+10. 旧版 sidegw-panel 禁用失败静默继续：已修改。
+11. crontab grep -v 空输出误判：已修改。
+12. toolbox.conf/bootstrap heredoc 写入未检查：已修改。
 
 建议修改：
 1. netstat preflight：已加入。
@@ -77,7 +84,7 @@ dry-run 不创建目录、不写配置、不注册 crontab/firewall include、�
 2. 更新安装是否保留启用状态：最终按更保守方案处理，只保留已验证/待确认状态，未验证启用配置降级关闭。
 
 主笔最终决策：
-先合入安全阻塞项，再进入下一轮审查；不把 shellcheck 历史 warning 作为本轮阻塞项。OpenCode 本轮因 API Unauthorized 无法完成有效审查，需要更换或修复 key。
+先合入安全阻塞项，再进入下一轮审查；不把 shellcheck 历史 warning 作为本轮阻塞项。OpenCode 连续返回 API Unauthorized，当前无法形成有效审查，需要更换或修复 key。
 ```
 
 ## 风险点列表

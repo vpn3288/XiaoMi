@@ -287,7 +287,9 @@ MSG=""
 ACTION=""
 POST_DATA=""
 VIEW_AUTH=0
-[ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+if [ ! -f "$CONF" ] && ! cp "$BASE/config.default" "$CONF"; then
+    MSG="默认配置初始化失败，请检查安装目录是否可写。"
+fi
 QUERY_ACTION="$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | sed -n 's/^action=//p' | head -n 1)"
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
@@ -455,7 +457,7 @@ fi
 
 MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
 
-if [ "$VIEW_AUTH" = "1" ]; then
+if [ "$VIEW_AUTH" = "1" ] && [ -f "$CONF" ]; then
     . "$CONF"
 fi
 ENABLED="${ENABLED:-0}"
