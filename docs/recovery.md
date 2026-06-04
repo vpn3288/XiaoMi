@@ -50,6 +50,10 @@ done < "$RULE_STATE"
 
 while ip rule del fwmark 0x65 lookup main 2>/dev/null; do :; done
 while ip rule del fwmark 0x64 table 100 2>/dev/null; do :; done
+ip rule 2>/dev/null | awk -F: '$1>=10000 && $1<=10299 && ($0 ~ /lookup 100/ || $0 ~ /lookup main/ || $0 ~ /fwmark 0x64/ || $0 ~ /fwmark 0x65/) {print $1}' |
+while read -r pref; do
+  while ip rule del pref "$pref" 2>/dev/null; do :; done
+done
 
 ip route flush table 100 2>/dev/null
 ```

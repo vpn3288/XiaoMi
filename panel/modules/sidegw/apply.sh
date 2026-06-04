@@ -172,11 +172,25 @@ rule_del_matching_sidegw_file() {
     )
 }
 
+rule_del_sidegw_pref_range() {
+    ip rule 2>/dev/null | while IFS= read -r line; do
+        pref="${line%%:*}"
+        echo "$pref" | grep -Eq '^[0-9]+$' || continue
+        [ "$pref" -ge "$PREF_START" ] && [ "$pref" -le "$PREF_END" ] || continue
+        case "$line" in
+            *" lookup $TABLE"|*" table $TABLE"|*"fwmark $MARK_SIDE"*|*"fwmark $MARK_DIRECT"*|*" lookup main"*)
+                while ip rule del pref "$pref" 2>/dev/null; do :; done
+                ;;
+        esac
+    done
+}
+
 ip_rules_cleanup() {
     rule_del_recorded_file "$RULE_STATE"
     rule_del_recorded_file "$NEW_RULE_STATE"
     rule_del_matching_sidegw_file "$APPLIED_CONFIG"
     rule_del_matching_sidegw
+    rule_del_sidegw_pref_range
 }
 
 iptables_cleanup() {

@@ -42,6 +42,6 @@ bootloader
 
 默认卸载会先关闭并清理 sidegw；如果选择保留配置，保存到 `config/sidegw.config` 的当前配置也会强制写为关闭状态，避免重装后自动重新启用。`config/sidegw.last_good` 只作为手动恢复材料保留。
 
-`apply.sh` 会在成功应用或成功关闭后记录 `config.applied`，用于在 `rules.state` 丢失时按上一次实际应用的网关、客户端 IP 和 LAN 网段做精确清理。安装升级会保留 `rules.state` 和 `config.applied`，但不会恢复按 pref 范围批量删除用户规则的旧做法。
+`apply.sh` 会在成功应用或成功关闭后记录 `config.applied`，用于在 `rules.state` 丢失时按上一次实际应用的网关、客户端 IP 和 LAN 网段做精确清理。清理时还会兜底删除 sidegw 预留 pref 范围 `10000-10299` 内匹配 table 100 / sidegw fwmark 的残留规则，避免状态文件丢失后留下 `from 客户端IP lookup 100` 规则。
 
 使用 MAC 分流时，脚本会放行来自旁路由 IP 的 LAN 内回程转发，避免只按客户端源 MAC 放行导致回包被较严格的 FORWARD 策略拦截。
