@@ -16,13 +16,16 @@ p{line-height:1.6}
 .label{font-size:12px;color:#667085;margin-bottom:5px}
 .value{font-size:15px;font-weight:700;word-break:break-all}
 label{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
-input[type=text],select,textarea{width:100%;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:9px;font-size:14px}
+input[type=text],input[type=password],select,textarea{width:100%;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:9px;font-size:14px}
 textarea{min-height:120px;resize:vertical;line-height:1.45}
 .row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 button,.button{display:inline-block;border:0;border-radius:6px;background:#1769cc;color:#fff;padding:9px 14px;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer}
 button.secondary,.button.secondary{background:#e8eef6;color:#172033}
 button.danger,.button.danger{background:#c62828}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.actions .token-field{display:flex;align-items:center;gap:8px;margin:0}
+.actions .token-field span{white-space:nowrap}
+.actions .token-field input{width:220px;max-width:48vw}
 pre{white-space:pre-wrap;overflow:auto;background:#0f172a;color:#dbeafe;border-radius:8px;padding:12px;font-size:12px;line-height:1.45;max-height:420px}
 .ok{color:#16803c}
 .bad{color:#bf2626}
