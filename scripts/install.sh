@@ -49,6 +49,27 @@ copy_disabled_config() {
     return 0
 }
 
+disable_legacy_sidegw_panel() {
+    router_root="${INSTALL_DIR%/toolbox}"
+    seen_legacy=""
+    for legacy_base in "$router_root/sidegw-panel" /mnt/*/xiaomi_router/sidegw-panel; do
+        [ -d "$legacy_base" ] || continue
+        [ "$legacy_base" = "$INSTALL_DIR/panel/modules/sidegw" ] && continue
+        case " $seen_legacy " in
+            *" $legacy_base "*) continue ;;
+        esac
+        seen_legacy="$seen_legacy $legacy_base"
+        if [ -f "$legacy_base/config/sidegw.conf" ]; then
+            copy_disabled_config "$legacy_base/config/sidegw.conf" "$legacy_base/config/sidegw.conf.tmp.$$" &&
+                mv "$legacy_base/config/sidegw.conf.tmp.$$" "$legacy_base/config/sidegw.conf"
+        fi
+        if [ -f "$legacy_base/bin/sidegw-panel-start.sh" ]; then
+            chmod a-x "$legacy_base/bin/sidegw-panel-start.sh" 2>/dev/null || true
+        fi
+        log "Disabled legacy sidegw panel: $legacy_base"
+    done
+}
+
 usage() {
     cat <<EOF
 Usage: sh scripts/install.sh [options]
@@ -107,6 +128,7 @@ ensure_cmd pidof
 
 mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/log" "$INSTALL_DIR/config"
 printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write install marker"
+disable_legacy_sidegw_panel
 
 keep_sidegw_config="/tmp/xiaomi-toolbox-sidegw-config.$$"
 keep_sidegw_last_good="/tmp/xiaomi-toolbox-sidegw-last-good.$$"

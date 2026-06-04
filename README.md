@@ -78,6 +78,8 @@ ssh $router "cd /tmp/XiaoMi-main && sh scripts/install.sh --dry-run --install-di
 
 `dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
 
+安装时会自动禁用旧版 `/xiaomi_router/sidegw-panel` 启动脚本，并把旧配置改成关闭，避免旧面板每分钟重建旧的分流规则。
+
 ## 本地 HTTP 中转安装，备用
 
 如果不想用 `scp`，也可以在本地电脑下载并开 HTTP 文件服务，让小米从局域网下载。
