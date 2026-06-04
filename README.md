@@ -39,39 +39,66 @@ sidegw 指定 IP / MAC 分流
 至少知道一台要测试的客户端 IP，例如 192.168.31.216
 ```
 
-下面所有命令都在“小米路由器 SSH”里执行，不是在电脑终端本地执行。
+除本地下载和本地开 HTTP 服务外，安装命令都在“小米路由器 SSH”里执行。
 
-## 直接复制安装
+## 本地中转安装，推荐
 
-SSH 登录小米万兆路由器后，整段复制执行即可。它会先尝试安装基础依赖，再从 GitHub 下载最新版并安装：
+这个方式适合小米万兆主路由不能访问 GitHub 的情况。GitHub 下载发生在本地电脑，小米只从局域网下载本地电脑已经准备好的安装包。
+
+先在本地电脑下载：
+
+```text
+https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
+```
+
+把下载到的文件改名为：
+
+```text
+XiaoMi-main.tar.gz
+```
+
+然后用本地电脑开一个临时 HTTP 文件服务，端口示例为 `8765`，并确保浏览器能打开：
+
+```text
+http://192.168.31.216:8765/XiaoMi-main.tar.gz
+```
+
+这里的 `192.168.31.216` 换成你的本地电脑 LAN IP。HTTP 文件服务可以用 SSH 工具自带的本地文件服务、HFS、Everything HTTP 服务、MobaXterm/FinalShell 的本地服务，或任何你习惯的本地 HTTP 文件服务器。
+
+确认本地链接能打开后，SSH 登录小米万兆路由器，整段复制执行：
 
 ```sh
 cd /tmp
-
-if command -v opkg >/dev/null 2>&1; then
-  opkg update
-  opkg install wget ca-bundle ca-certificates tar gzip uhttpd iptables ip-full 2>/dev/null || true
-fi
-
 rm -rf XiaoMi-main XiaoMi-main.tar.gz
-
-if command -v wget >/dev/null 2>&1; then
-  wget -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz ||
-    wget --no-check-certificate -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
-elif command -v curl >/dev/null 2>&1; then
-  curl -L -o XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
-else
-  echo "缺少 wget/curl，且无法自动下载 GitHub 安装包"
-  exit 1
-fi
-
+wget -O XiaoMi-main.tar.gz http://192.168.31.216:8765/XiaoMi-main.tar.gz
 tar -xzf XiaoMi-main.tar.gz
 cd XiaoMi-main
 sh scripts/install.sh --dry-run
 sh scripts/install.sh
 ```
 
-有些小米固件已经内置了这些命令，`opkg install` 显示个别包不存在不一定代表失败；最后以 `sh scripts/install.sh --dry-run` 的检查结果为准。
+如果你的本地电脑 IP 或端口不同，只改这一行：
+
+```sh
+wget -O XiaoMi-main.tar.gz http://你的电脑IP:端口/XiaoMi-main.tar.gz
+```
+
+`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
+
+## GitHub 直连安装，备用
+
+只有在小米万兆路由器自己能访问 GitHub 时，才用这一段：
+
+```sh
+cd /tmp
+rm -rf XiaoMi-main XiaoMi-main.tar.gz
+wget -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz ||
+  wget --no-check-certificate -O XiaoMi-main.tar.gz https://github.com/vpn3288/XiaoMi/archive/refs/heads/main.tar.gz
+tar -xzf XiaoMi-main.tar.gz
+cd XiaoMi-main
+sh scripts/install.sh --dry-run
+sh scripts/install.sh
+```
 
 默认安装位置：
 
