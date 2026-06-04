@@ -15,7 +15,16 @@ UNINSTALL=0
 INSTALL_EXISTED=0
 
 generate_admin_token() {
-    token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+    token=""
+    if command -v od >/dev/null 2>&1; then
+        token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+    fi
+    if [ -z "$token" ] && command -v hexdump >/dev/null 2>&1; then
+        token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | hexdump -v -e '1/1 "%02x"' 2>/dev/null)"
+    fi
+    if [ -z "$token" ]; then
+        token="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | dd bs=32 count=1 2>/dev/null)"
+    fi
     [ -n "$token" ] || return 1
     printf '%s\n' "$token"
 }
@@ -108,9 +117,13 @@ preflight() {
     ensure_cmd netstat
     ensure_cmd awk
     ensure_cmd dd
-    ensure_cmd od
     ensure_cmd tr
     ensure_cmd nslookup
+
+    if [ -z "$ADMIN_TOKEN" ]; then
+        generate_admin_token >/dev/null ||
+            die "cannot generate admin token; install with --admin-token TOKEN"
+    fi
 
     [ -d /sys/class/net/br-lan ] || die "br-lan not found; this installer expects Xiaomi/OpenWrt-like LAN bridge"
 

@@ -76,7 +76,7 @@ ssh $router "cd /tmp/XiaoMi-main && sh scripts/install.sh --dry-run --install-di
 
 把 `/mnt/sda1` 换成你实际的 U 盘挂载路径。
 
-`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof`、`netstat`、`awk` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
+`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof`、`netstat`、`awk` 等基础命令，并验证能生成面板管理口令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
 
 `dry-run` 还会检查 `br-lan`、安装目录对应的 `/mnt/...` 挂载点以及面板源码文件是否存在。它不会创建目录、写配置、注册定时任务或启动面板。
 

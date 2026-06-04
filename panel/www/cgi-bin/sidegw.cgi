@@ -13,7 +13,16 @@ LOCK_STALE_AFTER="${SIDEGW_LOCK_STALE_AFTER:-300}"
 LOCK_ACTIVE=0
 
 generate_admin_token() {
-    token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+    token=""
+    if command -v od >/dev/null 2>&1; then
+        token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+    fi
+    if [ -z "$token" ] && command -v hexdump >/dev/null 2>&1; then
+        token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | hexdump -v -e '1/1 "%02x"' 2>/dev/null)"
+    fi
+    if [ -z "$token" ]; then
+        token="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | dd bs=32 count=1 2>/dev/null)"
+    fi
     [ -n "$token" ] || return 1
     printf '%s\n' "$token"
 }
