@@ -233,7 +233,8 @@ write_config_file() {
     side_macs="$7"
     direct_ips="$8"
     direct_macs="$9"
-    mkdir -p "$BASE"
+    tmp="$dst.tmp.$$"
+    mkdir -p "$BASE" || return 1
     {
         echo "ENABLED='$enabled'"
         echo "MODE='$mode'"
@@ -243,7 +244,14 @@ write_config_file() {
         echo "SIDE_MACS='$side_macs'"
         echo "DIRECT_IPS='$direct_ips'"
         echo "DIRECT_MACS='$direct_macs'"
-    } > "$dst"
+    } > "$tmp" || {
+        rm -f "$tmp"
+        return 1
+    }
+    mv "$tmp" "$dst" || {
+        rm -f "$tmp"
+        return 1
+    }
 }
 
 write_config() {
@@ -302,6 +310,15 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
         case "$ACTION" in
             save|test|confirm|disable|delete_rules|remove_entries)
+                if [ "$(param action_confirm)" != "$ACTION" ]; then
+                    MSG="危险操作缺少二次确认，已拒绝执行。请从面板按钮重新确认。"
+                    ACTION=""
+                fi
+                ;;
+        esac
+
+        case "$ACTION" in
+            save|test|confirm|disable|delete_rules|remove_entries)
                 if ! take_lock; then
                     MSG="sidegw 正忙，另一个应用、预检、确认或回滚正在运行。请稍后重试。"
                     ACTION=""
@@ -311,20 +328,26 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
         case "$ACTION" in
             save)
-                write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-                if SAVE_CLEANUP="$(SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" 2>&1)"; then
-                    rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
-                    MSG="已保存配置并清理当前运行规则，但未启用。启用必须使用“应用并预检，失败自动回滚”。"
+                if write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"; then
+                    if SAVE_CLEANUP="$(SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" 2>&1)"; then
+                        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                        MSG="已保存为关闭配置并清理当前运行规则。启用必须使用“应用并预检，失败自动回滚”。"
+                    else
+                        MSG="已保存配置，但清理当前运行规则失败；待确认回滚标记已保留。输出：$SAVE_CLEANUP"
+                    fi
                 else
-                    MSG="已保存配置，但清理当前运行规则失败；待确认回滚标记已保留。输出：$SAVE_CLEANUP"
+                    MSG="配置写入失败，未执行清理或应用。请检查安装目录是否可写。"
                 fi
                 ;;
             apply)
                 MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"
                 ;;
             test)
-                write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-                MSG="$(SIDEGW_LOCK_HELD=1 "$BASE/test.sh" 2>&1)"
+                if write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"; then
+                    MSG="$(SIDEGW_LOCK_HELD=1 "$BASE/test.sh" 2>&1)"
+                else
+                    MSG="配置写入失败，未执行应用预检。请检查安装目录是否可写。"
+                fi
                 ;;
             confirm)
                 confirm_now="$(date +%s 2>/dev/null || echo 0)"
@@ -333,9 +356,12 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                     [ "$confirm_now" -le "$confirm_until" ] &&
                     [ -f "$PENDING_GOOD" ] &&
                     cmp -s "$PENDING_GOOD" "$CONF"; then
-                    cp "$PENDING_GOOD" "$BASE/config.last_good"
-                    rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
-                    MSG="已确认客户端联网正常，并保存为已验证配置。后续 cron/firewall 只会重应用该已验证配置。"
+                    if cp "$PENDING_GOOD" "$BASE/config.last_good"; then
+                        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                        MSG="已确认客户端联网正常，并保存为已验证配置。后续 cron/firewall 只会重应用该已验证配置。"
+                    else
+                        MSG="保存已验证配置失败，待确认回滚标记已保留。请检查安装目录是否可写。"
+                    fi
                 else
                     if [ -f "$PENDING_GOOD" ] || [ -f "$PENDING_UNTIL" ]; then
                         MSG="没有可确认的待验证配置，或当前配置已变化。待确认回滚标记已保留，请重新应用并预检，或使用一键关闭。"
@@ -364,14 +390,17 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                     DIRECT_IPS="$(filter_words "${DIRECT_IPS:-}" "$REMOVE_IPS")"
                     SIDE_MACS="$(filter_words "${SIDE_MACS:-}" "$REMOVE_MACS")"
                     DIRECT_MACS="$(filter_words "${DIRECT_MACS:-}" "$REMOVE_MACS")"
-                    write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"
-                    remove_entries_from_config_file "$BASE/config.last_good" "$REMOVE_IPS" "$REMOVE_MACS"
-                    remove_entries_from_config_file "$BASE/config.pending_good" "$REMOVE_IPS" "$REMOVE_MACS"
-                    if REMOVE_CLEANUP="$(SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" 2>&1)"; then
-                        rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
-                        MSG="已删除匹配的配置条目，并清理当前运行规则。"
+                    if write_config "0" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS" &&
+                        remove_entries_from_config_file "$BASE/config.last_good" "$REMOVE_IPS" "$REMOVE_MACS" &&
+                        remove_entries_from_config_file "$BASE/config.pending_good" "$REMOVE_IPS" "$REMOVE_MACS"; then
+                        if REMOVE_CLEANUP="$(SIDEGW_LOCK_HELD=1 "$BASE/apply.sh" 2>&1)"; then
+                            rm -f "$PENDING_GOOD" "$PENDING_UNTIL"
+                            MSG="已删除匹配的配置条目，并清理当前运行规则。"
+                        else
+                            MSG="已删除匹配的配置条目，但清理当前运行规则失败；待确认回滚标记已保留。输出：$REMOVE_CLEANUP"
+                        fi
                     else
-                        MSG="已删除匹配的配置条目，但清理当前运行规则失败；待确认回滚标记已保留。输出：$REMOVE_CLEANUP"
+                        MSG="配置写入失败，未执行删除后的规则清理。请检查安装目录是否可写。"
                     fi
                 fi
                 ;;
@@ -470,10 +499,11 @@ Content-Type: text/html; charset=utf-8
 <main>
 <section class="card"><h1>sidegw 指定 IP / MAC 分流</h1><div class="stats"><div class="stat"><div class="label">主路由 IP</div><div class="value">$ROUTER_IP_SAFE</div></div><div class="stat"><div class="label">当前访问 IP</div><div class="value">$CURRENT_IP_SAFE</div></div><div class="stat"><div class="label">旁路由</div><div class="value">$GATEWAY_SAFE</div></div><div class="stat"><div class="label">旁路由状态</div><div class="value">$PING_STATUS</div></div></div></section>
 <form method="post" action="/cgi-bin/sidegw.cgi">
+<input type="hidden" name="action_confirm" value="">
 <section class="card"><h2>基础设置</h2><div class="row"><input id="enabled" name="enabled" value="1" type="checkbox" $checked><label for="enabled">启用 sidegw</label></div><div class="grid"><div><label>旁路由 IP</label><input name="gateway" type="text" value="$GATEWAY_SAFE" placeholder="192.168.31.118"></div><div><label>LAN 网段</label><input name="lan_cidr" type="text" value="$LAN_CIDR_SAFE"></div><div><label>模式</label><select name="mode"><option value="list" $mode_list>仅列表设备走旁路由</option><option value="all" $mode_all>全 LAN 走旁路由，直连列表除外</option></select></div></div><p>待确认状态：$PENDING_STATUS_SAFE</p></section>
-<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“当前访问 IP”只用于提示，不会自动加入分流列表。“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="actions"><button name="action" value="save">保存配置</button><button name="action" value="test">应用并预检，失败自动回滚</button><label class="token-field"><span>当前管理口令</span><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></label><button name="action" value="confirm">确认客户端正常并持久化</button><button name="action" value="disable" class="danger">一键关闭</button></div></section>
-<section class="card"><h2>删除配置条目</h2><div class="grid"><div><label>删除 IP</label><textarea name="remove_ips"></textarea></div><div><label>删除 MAC</label><textarea name="remove_macs"></textarea></div></div><div class="actions"><button name="action" value="remove_entries">删除配置条目</button></div></section>
-<section class="card"><h2>删除所有规则</h2><div class="actions"><button name="action" value="delete_rules" class="danger">删除所有规则</button></div></section>
+<section class="card"><h2>设备列表</h2><div class="grid"><div><label>走旁路由 IP</label><textarea name="side_ips">$side_ips_text</textarea></div><div><label>走旁路由 MAC</label><textarea name="side_macs">$side_macs_text</textarea></div><div><label>直连 IP</label><textarea name="direct_ips">$direct_ips_text</textarea></div><div><label>直连 MAC</label><textarea name="direct_macs">$direct_macs_text</textarea></div></div><p>“当前访问 IP”只用于提示，不会自动加入分流列表。“应用并预检”会检查规则、DNS 链和旁路由可达性；真正出口 IP 请在命中的客户端上用 <code>curl -4 http://ifconfig.me/ip</code> 验证，正常后再确认持久化。</p><div class="actions"><button name="action" value="save" onclick="this.form.elements.action_confirm.value='save'; return confirm('确认保存为关闭配置并清理当前 sidegw 运行规则？')">保存为关闭配置并清理当前规则</button><button name="action" value="test" onclick="this.form.elements.action_confirm.value='test'; return confirm('确认临时修改路由和 DNS 规则并开始 5 分钟预检？失败会自动回滚。')">应用并预检，失败自动回滚</button><label class="token-field"><span>当前管理口令</span><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></label><button name="action" value="confirm" onclick="this.form.elements.action_confirm.value='confirm'; return confirm('确认已在命中客户端验证外网正常，并保存为后续可重应用配置？')">确认客户端正常并持久化</button><button name="action" value="disable" class="danger" onclick="this.form.elements.action_confirm.value='disable'; return confirm('确认关闭 sidegw 并清理当前运行规则？')">一键关闭</button></div></section>
+<section class="card"><h2>删除配置条目</h2><div class="grid"><div><label>删除 IP</label><textarea name="remove_ips"></textarea></div><div><label>删除 MAC</label><textarea name="remove_macs"></textarea></div></div><div class="actions"><button name="action" value="remove_entries" onclick="this.form.elements.action_confirm.value='remove_entries'; return confirm('确认删除这些 IP 或 MAC 配置条目？')">删除配置条目</button></div></section>
+<section class="card"><h2>删除所有规则</h2><div class="actions"><button name="action" value="delete_rules" class="danger" onclick="this.form.elements.action_confirm.value='delete_rules'; return confirm('确认删除所有 sidegw 运行规则并关闭当前配置？')">删除所有规则</button></div></section>
 </form>
 <form method="post" action="/cgi-bin/sidegw.cgi">
 <section class="card"><h2>修改管理口令</h2><div class="grid"><div><label>当前管理口令</label><input name="admin_token" type="password" autocomplete="current-password" placeholder="$TOKEN_HINT_SAFE"></div><div><label>新管理口令</label><input name="new_admin_token" type="password" autocomplete="new-password" placeholder="6-64 位"></div><div><label>再次输入新口令</label><input name="new_admin_token_confirm" type="password" autocomplete="new-password" placeholder="再次输入"></div></div><div class="actions"><button name="action" value="change_token">更新管理口令</button></div></section>

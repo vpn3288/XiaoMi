@@ -10,6 +10,7 @@ PORT="$DEFAULT_PORT"
 DRY_RUN=0
 AUTOSTART=1
 ADMIN_TOKEN=""
+UNINSTALL=0
 
 generate_admin_token() {
     token="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
@@ -81,11 +82,40 @@ Options:
   --port PORT            Panel port, default: $DEFAULT_PORT
   --admin-token TOKEN    Set panel management token, 6-64 chars: A-Z a-z 0-9 . _ -
   --no-autostart         Do not register cron/firewall autostart
+  --uninstall            Run scripts/uninstall.sh for this install dir
   --help                 Show this help
 
 Safety:
   Install does not enable sidegw by default.
 EOF
+}
+
+install_mount_dir() {
+    rel="${INSTALL_DIR#/mnt/}"
+    mount_name="${rel%%/*}"
+    printf '/mnt/%s\n' "$mount_name"
+}
+
+preflight() {
+    ensure_cmd ip
+    ensure_cmd iptables
+    ensure_cmd uci
+    ensure_cmd uhttpd
+    ensure_cmd pidof
+    ensure_cmd netstat
+    ensure_cmd awk
+
+    [ -d /sys/class/net/br-lan ] || die "br-lan not found; this installer expects Xiaomi/OpenWrt-like LAN bridge"
+
+    mount_dir="$(install_mount_dir)"
+    [ -d "$mount_dir" ] || die "USB mount path not found: $mount_dir"
+    awk -v m="$mount_dir" '$2 == m { found = 1 } END { exit found ? 0 : 1 }' /proc/mounts ||
+        die "USB mount path is not mounted: $mount_dir"
+
+    [ -d "$SCRIPT_DIR/../panel/www" ] || die "source panel/www missing"
+    [ -d "$SCRIPT_DIR/../panel/modules/sidegw" ] || die "source sidegw module missing"
+    [ -f "$SCRIPT_DIR/../panel/www/cgi-bin/sidegw.cgi" ] || die "source sidegw CGI missing"
+    [ -f "$SCRIPT_DIR/../panel/modules/sidegw/apply.sh" ] || die "source sidegw apply script missing"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -96,6 +126,7 @@ while [ "$#" -gt 0 ]; do
         --port) shift; [ "$#" -gt 0 ] || die "--port requires PORT"; PORT="$1" ;;
         --admin-token) shift; [ "$#" -gt 0 ] || die "--admin-token requires TOKEN"; ADMIN_TOKEN="$1" ;;
         --no-autostart) AUTOSTART=0 ;;
+        --uninstall) UNINSTALL=1 ;;
         --help|-h) usage; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
@@ -108,23 +139,22 @@ echo "$PORT" | grep -Eq '^[0-9]{1,5}$' || die "invalid port: $PORT"
 is_safe_install_dir "$INSTALL_DIR" || die "unsafe install dir: $INSTALL_DIR"
 [ -z "$ADMIN_TOKEN" ] || valid_admin_token "$ADMIN_TOKEN" || die "invalid admin token; use 6-64 chars: A-Z a-z 0-9 . _ -"
 
+if [ "$UNINSTALL" = "1" ]; then
+    [ "$DRY_RUN" = "0" ] || die "--dry-run cannot be combined with --uninstall; run scripts/uninstall.sh after reviewing the install dir"
+    exec sh "$SCRIPT_DIR/uninstall.sh" --install-dir "$INSTALL_DIR"
+fi
+
 log "Install dir: $INSTALL_DIR"
 log "Panel URL: http://$HOST:$PORT/cgi-bin/sidegw.cgi"
 log "Dry run: $DRY_RUN"
 log "Autostart: $AUTOSTART"
 
+preflight
+
 if [ "$DRY_RUN" = "1" ]; then
-    log "Dry run complete. No changes were made."
+    log "Dry run preflight passed. No changes were made."
     exit 0
 fi
-
-ensure_cmd ip
-ensure_cmd iptables
-ensure_cmd uci
-ensure_cmd uhttpd
-ensure_cmd pidof
-
-[ -d /sys/class/net/br-lan ] || die "br-lan not found; this installer expects Xiaomi/OpenWrt-like LAN bridge"
 
 mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/log" "$INSTALL_DIR/config"
 printf '%s\n' "$APP_NAME" > "$INSTALL_DIR/$INSTALL_MARKER" || die "cannot write install marker"
@@ -144,6 +174,30 @@ cleanup_temp() {
         "$keep_sidegw_pending_until" "$keep_admin_token"
 }
 trap cleanup_temp EXIT
+
+restore_temp_file() {
+    src="$1"
+    dst="$2"
+    label="$3"
+    [ -f "$src" ] || return 0
+    if ! cp "$src" "$dst"; then
+        trap - EXIT
+        die "cannot restore $label to $dst; preserved temp files remain in /tmp"
+    fi
+    rm -f "$src"
+}
+
+restore_disabled_temp_file() {
+    src="$1"
+    dst="$2"
+    label="$3"
+    [ -f "$src" ] || return 0
+    if ! copy_disabled_config "$src" "$dst"; then
+        trap - EXIT
+        die "cannot restore disabled $label to $dst; preserved temp files remain in /tmp"
+    fi
+    rm -f "$src"
+}
 
 if [ -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
     cp "$INSTALL_DIR/panel/modules/sidegw/config" "$keep_sidegw_config" || die "cannot preserve sidegw config"
@@ -178,11 +232,11 @@ backup_path_move "$INSTALL_DIR/panel/modules/sidegw"
 backup_file "$INSTALL_DIR/config/toolbox.conf"
 backup_file "$INSTALL_DIR/toolbox-bootstrap.sh"
 
-mkdir -p "$INSTALL_DIR/panel/www" "$INSTALL_DIR/panel/modules"
+mkdir -p "$INSTALL_DIR/panel/www" "$INSTALL_DIR/panel/modules" || die "cannot create panel directories"
 
-cp -R "$SCRIPT_DIR/../panel/www/." "$INSTALL_DIR/panel/www/"
-mkdir -p "$INSTALL_DIR/panel/modules/sidegw"
-cp -R "$SCRIPT_DIR/../panel/modules/sidegw/." "$INSTALL_DIR/panel/modules/sidegw/"
+cp -R "$SCRIPT_DIR/../panel/www/." "$INSTALL_DIR/panel/www/" || die "cannot copy panel web files"
+mkdir -p "$INSTALL_DIR/panel/modules/sidegw" || die "cannot create sidegw module directory"
+cp -R "$SCRIPT_DIR/../panel/modules/sidegw/." "$INSTALL_DIR/panel/modules/sidegw/" || die "cannot copy sidegw module files"
 chmod -R a+rX "$INSTALL_DIR/panel/www" "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/panel/www/cgi-bin/"*.cgi 2>/dev/null || true
 chmod +x "$INSTALL_DIR/panel/modules/sidegw/"*.sh 2>/dev/null || true
@@ -294,29 +348,34 @@ EOF
 chmod +x "$INSTALL_DIR/toolbox-bootstrap.sh"
 
 if [ -f "$keep_sidegw_config" ]; then
-    mv "$keep_sidegw_config" "$INSTALL_DIR/panel/modules/sidegw/config"
+    if [ -f "$keep_sidegw_last_good" ] || [ -f "$keep_sidegw_pending_good" ]; then
+        restore_temp_file "$keep_sidegw_config" "$INSTALL_DIR/panel/modules/sidegw/config" "sidegw config"
+    else
+        restore_disabled_temp_file "$keep_sidegw_config" "$INSTALL_DIR/panel/modules/sidegw/config" "sidegw config"
+    fi
 elif [ ! -f "$INSTALL_DIR/panel/modules/sidegw/config" ]; then
-    cp "$INSTALL_DIR/panel/modules/sidegw/config.default" "$INSTALL_DIR/panel/modules/sidegw/config"
+    cp "$INSTALL_DIR/panel/modules/sidegw/config.default" "$INSTALL_DIR/panel/modules/sidegw/config" ||
+        die "cannot create default sidegw config"
 fi
 if [ -f "$keep_sidegw_last_good" ]; then
-    mv "$keep_sidegw_last_good" "$INSTALL_DIR/panel/modules/sidegw/config.last_good"
+    restore_temp_file "$keep_sidegw_last_good" "$INSTALL_DIR/panel/modules/sidegw/config.last_good" "sidegw last-good config"
 fi
 if [ -f "$keep_sidegw_rules_state" ]; then
-    mv "$keep_sidegw_rules_state" "$INSTALL_DIR/panel/modules/sidegw/rules.state"
+    restore_temp_file "$keep_sidegw_rules_state" "$INSTALL_DIR/panel/modules/sidegw/rules.state" "sidegw rules state"
 fi
 if [ -f "$keep_sidegw_applied_config" ]; then
-    mv "$keep_sidegw_applied_config" "$INSTALL_DIR/panel/modules/sidegw/config.applied"
+    restore_temp_file "$keep_sidegw_applied_config" "$INSTALL_DIR/panel/modules/sidegw/config.applied" "sidegw applied config"
 fi
 if [ -f "$keep_sidegw_pending_good" ]; then
-    mv "$keep_sidegw_pending_good" "$INSTALL_DIR/panel/modules/sidegw/config.pending_good"
+    restore_temp_file "$keep_sidegw_pending_good" "$INSTALL_DIR/panel/modules/sidegw/config.pending_good" "sidegw pending config"
 fi
 if [ -f "$keep_sidegw_pending_until" ]; then
-    mv "$keep_sidegw_pending_until" "$INSTALL_DIR/panel/modules/sidegw/config.pending_until"
+    restore_temp_file "$keep_sidegw_pending_until" "$INSTALL_DIR/panel/modules/sidegw/config.pending_until" "sidegw pending deadline"
 fi
 if [ -n "$ADMIN_TOKEN" ]; then
     write_admin_token "$INSTALL_DIR/panel/modules/sidegw/admin.token" "$ADMIN_TOKEN" || die "cannot write admin token"
 elif [ -f "$keep_admin_token" ]; then
-    mv "$keep_admin_token" "$INSTALL_DIR/panel/modules/sidegw/admin.token"
+    restore_temp_file "$keep_admin_token" "$INSTALL_DIR/panel/modules/sidegw/admin.token" "admin token"
     chmod 600 "$INSTALL_DIR/panel/modules/sidegw/admin.token" 2>/dev/null || true
 fi
 if [ ! -f "$INSTALL_DIR/panel/modules/sidegw/admin.token" ]; then
@@ -331,10 +390,10 @@ if [ "$AUTOSTART" = "1" ]; then
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 
     backup_file /etc/config/firewall
-    uci set firewall.$FIREWALL_SECTION='include'
-    uci set firewall.$FIREWALL_SECTION.type='script'
-    uci set firewall.$FIREWALL_SECTION.path="$INSTALL_DIR/toolbox-bootstrap.sh"
-    uci set firewall.$FIREWALL_SECTION.enabled='1'
+    uci set "firewall.$FIREWALL_SECTION=include"
+    uci set "firewall.$FIREWALL_SECTION.type=script"
+    uci set "firewall.$FIREWALL_SECTION.path=$INSTALL_DIR/toolbox-bootstrap.sh"
+    uci set "firewall.$FIREWALL_SECTION.enabled=1"
     uci commit firewall
 fi
 
@@ -345,4 +404,9 @@ log "Open: http://$HOST:$PORT/cgi-bin/sidegw.cgi"
 log "Home: http://$HOST:$PORT/"
 log "Panel management token: $(cat "$INSTALL_DIR/panel/modules/sidegw/admin.token")"
 log "Keep this token. The panel requires it for save/apply/confirm/disable actions."
-log "sidegw is installed but remains disabled until you enable it in the panel."
+if grep -Eq "^[[:space:]]*ENABLED=['\"]?1['\"]?[[:space:]]*$" "$INSTALL_DIR/panel/modules/sidegw/config" &&
+    [ -f "$INSTALL_DIR/panel/modules/sidegw/config.last_good" ]; then
+    log "sidegw verified config was preserved from an existing install; check the panel before changing it."
+else
+    log "sidegw is installed with the current config disabled until you enable it in the panel."
+fi

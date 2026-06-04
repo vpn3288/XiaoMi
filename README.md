@@ -76,7 +76,9 @@ ssh $router "cd /tmp/XiaoMi-main && sh scripts/install.sh --dry-run --install-di
 
 把 `/mnt/sda1` 换成你实际的 U 盘挂载路径。
 
-`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
+`dry-run` 会检查小米路由器上是否有 `ip`、`iptables`、`uci`、`uhttpd`、`pidof`、`netstat`、`awk` 等基础命令。大多数小米 / OpenWrt 环境已经内置；如果缺少，先按固件环境补齐对应依赖后再安装。
+
+`dry-run` 还会检查 `br-lan`、安装目录对应的 `/mnt/...` 挂载点以及面板源码文件是否存在。它不会创建目录、写配置、注册定时任务或启动面板。
 
 安装时会自动禁用旧版 `/xiaomi_router/sidegw-panel` 启动脚本，并把旧配置改成关闭，避免旧面板每分钟重建旧的分流规则。
 
@@ -192,6 +194,8 @@ http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 
 面板会直接显示当前配置和诊断信息。执行保存、预检、确认持久化、删除或关闭时，在“确认客户端正常并持久化”旁边的当前管理口令框填入安装时显示的 Panel management token。
 
+会影响运行规则的动作还会弹出二次确认；服务端也会校验本次按钮动作的确认参数。只带管理口令直接 POST 危险动作会被拒绝。
+
 ## 新手推荐填写
 
 先只测试一台设备：
@@ -210,7 +214,7 @@ LAN 网段：192.168.31.0/24
 然后按这个顺序点：
 
 ```text
-1. 保存配置
+1. 保存为关闭配置并清理当前规则
 2. 应用并预检，失败自动回滚
 3. 确认客户端网络正常
 4. 确认客户端正常并持久化
@@ -318,6 +322,12 @@ sh scripts/uninstall.sh
 
 默认卸载会先关闭并清理 sidegw。保留下来的当前配置会强制写成关闭状态，重装后不会自动启用分流；上一次已验证配置仍会作为恢复材料保留。
 
+也可以从安装脚本入口卸载：
+
+```sh
+sh scripts/install.sh --uninstall
+```
+
 连配置一起删除：
 
 ```sh
@@ -337,7 +347,7 @@ sh scripts/uninstall.sh --install-dir /mnt/sda1/xiaomi_router/toolbox
 
 ## 更新到最新版
 
-重新下载最新版并安装即可。安装脚本会尽量保留现有配置、管理口令、待确认状态和已应用状态：
+重新下载最新版并安装即可。安装脚本会保留管理口令、已验证配置和待确认状态。为避免未验证规则在重装后自动复活，如果旧的当前配置是启用状态但没有 `config.last_good` 或待确认验证状态，安装脚本会把当前配置降级为关闭：
 
 ```sh
 cd /tmp
@@ -348,7 +358,7 @@ cd XiaoMi-main
 sh scripts/install.sh
 ```
 
-更新不会默认启用 sidegw。旧版本卸载后留下的保留配置也会按关闭状态处理，避免重装后无确认自动启用。
+更新不会默认启用未验证的 sidegw 配置。旧版本卸载后留下的保留配置也会按关闭状态处理，避免重装后无确认自动启用。
 
 ## 常见问题
 
@@ -401,7 +411,27 @@ panel/
       diagnose.sh
       test.sh
       config.default
+tests/
+  shellcheck/run.sh 静态语法检查；RUN_SHELLCHECK=1 时追加 shellcheck
 ```
+
+## 本地静态检查
+
+在源码目录执行：
+
+```sh
+sh tests/shellcheck/run.sh
+```
+
+这个检查只读取源码文件，不会应用网络规则，也不会写路由器配置。
+
+需要更严格的 shellcheck 审查时执行：
+
+```sh
+RUN_SHELLCHECK=1 sh tests/shellcheck/run.sh
+```
+
+当前 `RUN_SHELLCHECK=1` 是严格审查入口，不是默认绿色门槛；它可能输出仓库既有 warning/info，需要按风险分批处理。
 
 ## 已验证的核心逻辑
 
