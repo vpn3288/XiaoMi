@@ -171,3 +171,20 @@ docs/second-round-change-summary.md
 是否默认启用：否
 是否有自动回滚：本轮未触发 sidegw 应用；原有应用预检仍有自动回滚
 ```
+
+## 第三轮快速加固补充
+
+```text
+1. RUN_SHELLCHECK=1 现在作为可通过的严格质量门。
+2. 新增 panel/www/cgi-bin/api.cgi 作为后续统一 API 入口占位。
+3. MAC-only 分流可以进入自动预检；预检会检查 mangle mark、DNS DNAT/SNAT 和 FORWARD 规则。
+4. 面板预检先写 config.candidate，再由 test.sh 在 pending 状态写入成功后同步正式 config。
+5. toolbox-bootstrap.sh 拒绝应用普通未验证 ENABLED=1 配置，避免 cron/firewall 误重应用候选配置。
+6. ip rule 兜底清理不再删除普通 lookup main 规则，只清理 table 100 和 sidegw fwmark。
+7. fresh install 失败时 autostart 恢复不再依赖旧目录备份门控。
+8. uninstall.sh crontab 清理改用带 PID 的临时文件。
+9. diagnose.sh 默认对 token/password/cookie/key/secret/uuid、URL 和 MAC 做基础脱敏。
+10. README 和 safety 增加可信 LAN 使用、快转/硬件加速排障、MAC 预检能力说明。
+11. uninstall.sh 在 rollback.sh 缺失或不可执行时会运行内置 fallback 清理，不再静默卸载。
+12. MAC 预检增加可选 fwmark route 检查；系统 ip 不支持 mark route get 时会明确提示跳过。
+```

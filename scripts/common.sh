@@ -1,10 +1,16 @@
 #!/bin/sh
 
+# shellcheck disable=SC2034
 APP_NAME="xiaomi-toolbox"
+# shellcheck disable=SC2034
 DEFAULT_INSTALL_DIR="/mnt/usb-d965c2b9/xiaomi_router/toolbox"
+# shellcheck disable=SC2034
 DEFAULT_HOST="192.168.31.1"
+# shellcheck disable=SC2034
 DEFAULT_PORT="8888"
+# shellcheck disable=SC2034
 CRON_MARK="# xiaomi-toolbox"
+# shellcheck disable=SC2034
 FIREWALL_SECTION="xiaomi_toolbox_bootstrap"
 INSTALL_MARKER=".xiaomi-toolbox-install"
 
@@ -21,6 +27,7 @@ is_ipv4() {
     echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
     oldifs="$IFS"
     IFS=.
+    # shellcheck disable=SC2086
     set -- $1
     IFS="$oldifs"
     [ "$#" -eq 4 ] || return 1

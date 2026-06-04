@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BASE="${SIDEGW_BASE:-$(CDPATH= cd "$(dirname "$0")" && pwd)}"
+BASE="${SIDEGW_BASE:-$(unset CDPATH; cd "$(dirname "$0")" && pwd)}"
 CONF="$BASE/config"
 LOCK_DIR="/tmp/xiaomi-toolbox-sidegw.lock"
 LOCK_PID="$LOCK_DIR/pid"

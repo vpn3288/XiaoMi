@@ -194,11 +194,15 @@ sh scripts/install.sh --install-dir /mnt/sda1/xiaomi_router/toolbox --host 192.1
 http://192.168.31.1:8888/cgi-bin/sidegw.cgi
 ```
 
+也可以打开 `http://192.168.31.1:8888/`，首页会自动跳转到 sidegw 页面。
+
 面板会显示基础入口。当前配置、运行规则和诊断输出需要提交管理口令后查看。执行保存、预检、确认持久化、删除或关闭时，在“确认客户端正常并持久化”旁边的当前管理口令框填入安装时显示的 Panel management token。
 
 会影响运行规则的动作还会弹出二次确认；服务端也会校验本次按钮动作的确认参数。只带管理口令直接 POST 危险动作会被拒绝。
 
 面板的危险操作需要浏览器启用 JavaScript。禁用 JavaScript 时，服务端会拒绝缺少二次确认参数的危险动作。
+
+当前面板是本地 HTTP 面板，管理口令会通过可信 LAN 内的 HTTP POST 提交。请只在自己的内网和可信电脑上使用，不要把端口暴露到公网或访客 Wi-Fi。
 
 ## 新手推荐填写
 
@@ -226,7 +230,7 @@ LAN 网段：192.168.31.0/24
 
 `应用并预检` 通过后，规则只会临时生效 5 分钟。5 分钟内不点确认，就会自动回到上一次已验证配置或关闭状态。
 
-当前自动预检只支持“仅列表设备走旁路由”的 IP 列表。MAC-only 和全 LAN 模式可以保存为关闭配置，但不会通过自动预检启用。
+当前自动预检支持“仅列表设备走旁路由”的 IP 列表、MAC 列表或 IP+MAC 混合列表。全 LAN 模式风险更高，仍只允许保存为关闭配置，不会通过自动预检启用。
 
 ## 在客户端验证
 
@@ -250,6 +254,8 @@ curl -4 ifconfig.me
 ```
 
 只有确认后，配置才会写入 `config.last_good`，后续重启、防火墙重载、定时任务才会继续重应用。
+
+某些固件的快转、硬件加速或 flow offload 可能绕过 `ip rule` / `iptables`，导致规则存在但分流不生效。诊断页会显示 ECM、SFE、PPE、FLOWOFFLOAD、nft flowtable 等线索；排障时可以先临时关闭相关加速验证原因，不建议默认永久关闭。
 
 ## 一键关闭
 
@@ -407,6 +413,7 @@ panel/
   www/
     index.html
     assets/style.css
+    cgi-bin/api.cgi     统一 API 入口占位，当前转交 sidegw
     cgi-bin/sidegw.cgi
   modules/
     sidegw/

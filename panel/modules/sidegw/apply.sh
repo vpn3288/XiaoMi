@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BASE="${SIDEGW_BASE:-$(CDPATH= cd "$(dirname "$0")" && pwd)}"
+BASE="${SIDEGW_BASE:-$(unset CDPATH; cd "$(dirname "$0")" && pwd)}"
 CONF="${SIDEGW_CONFIG:-$BASE/config}"
 TABLE="${SIDEGW_TABLE:-100}"
 LAN_IF="${SIDEGW_LAN_IF:-br-lan}"
@@ -31,6 +31,7 @@ valid_ip() {
     echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
     oldifs="$IFS"
     IFS=.
+    # shellcheck disable=SC2086
     set -- $1
     IFS="$oldifs"
     [ "$#" -eq 4 ] || return 1
@@ -132,27 +133,52 @@ rule_del_recorded_file() {
     [ -f "$file" ] || return 0
     while IFS= read -r rule_args; do
         [ -n "$rule_args" ] || continue
+        # shellcheck disable=SC2086
         set -- $rule_args
         while ip rule del "$@" 2>/dev/null; do :; done
     done < "$file"
 }
 
+rule_del_pref_matching() {
+    match_a="$1"
+    match_b="$2"
+    ip rule 2>/dev/null | while IFS= read -r line; do
+        pref="${line%%:*}"
+        echo "$pref" | grep -Eq '^[0-9]+$' || continue
+        [ "$pref" -ge "$PREF_START" ] && [ "$pref" -le "$PREF_END" ] || continue
+        case "$line" in
+            *"$match_a"*) ;;
+            *) continue ;;
+        esac
+        if [ -n "$match_b" ]; then
+            case "$line" in
+                *"$match_b"*) ;;
+                *) continue ;;
+            esac
+        fi
+        while ip rule del pref "$pref" 2>/dev/null; do :; done
+    done
+}
+
 rule_del_matching_sidegw() {
-    while ip rule del fwmark "$MARK_DIRECT" lookup main 2>/dev/null; do :; done
-    while ip rule del fwmark "$MARK_SIDE" table "$TABLE" 2>/dev/null; do :; done
+    rule_del_pref_matching "fwmark $MARK_DIRECT" "lookup main"
+    rule_del_pref_matching "fwmark $MARK_SIDE" "lookup $TABLE"
+    rule_del_pref_matching "fwmark $MARK_SIDE" "table $TABLE"
 
     for ipaddr in $DIRECT_IPS $GATEWAY; do
         valid_ip "$ipaddr" || continue
-        while ip rule del from "$ipaddr/32" lookup main 2>/dev/null; do :; done
+        rule_del_pref_matching "from $ipaddr" "lookup main"
     done
 
     for ipaddr in $SIDE_IPS; do
         valid_ip "$ipaddr" || continue
-        while ip rule del from "$ipaddr/32" table "$TABLE" 2>/dev/null; do :; done
+        rule_del_pref_matching "from $ipaddr" "lookup $TABLE"
+        rule_del_pref_matching "from $ipaddr" "table $TABLE"
     done
 
     if [ "$MODE" = "all" ] && valid_cidr "$LAN_CIDR"; then
-        while ip rule del from "$LAN_CIDR" table "$TABLE" 2>/dev/null; do :; done
+        rule_del_pref_matching "from $LAN_CIDR" "lookup $TABLE"
+        rule_del_pref_matching "from $LAN_CIDR" "table $TABLE"
     fi
 }
 
@@ -166,6 +192,7 @@ rule_del_matching_sidegw_file() {
         LAN_CIDR=192.168.31.0/24
         SIDE_IPS=
         DIRECT_IPS=
+        # shellcheck source=/dev/null
         . "$file" 2>/dev/null || exit 0
         [ "$MODE" = "all" ] || MODE="list"
         rule_del_matching_sidegw
@@ -178,7 +205,7 @@ rule_del_sidegw_pref_range() {
         echo "$pref" | grep -Eq '^[0-9]+$' || continue
         [ "$pref" -ge "$PREF_START" ] && [ "$pref" -le "$PREF_END" ] || continue
         case "$line" in
-            *" lookup $TABLE"|*" table $TABLE"|*"fwmark $MARK_SIDE"*|*"fwmark $MARK_DIRECT"*|*" lookup main"*)
+            *" lookup $TABLE"|*" table $TABLE"|*"fwmark $MARK_SIDE"*|*"fwmark $MARK_DIRECT"*)
                 while ip rule del pref "$pref" 2>/dev/null; do :; done
                 ;;
         esac
@@ -396,6 +423,7 @@ rm -f "$NEW_RULE_STATE"
 : > "$NEW_RULE_STATE"
 
 [ -f "$CONF" ] || cp "$BASE/config.default" "$CONF"
+# shellcheck source=/dev/null
 . "$CONF"
 
 ENABLED="${ENABLED:-0}"

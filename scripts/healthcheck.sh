@@ -1,7 +1,8 @@
 #!/bin/sh
 set -u
 
-SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(unset CDPATH; cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/common.sh
 . "$SCRIPT_DIR/common.sh"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"

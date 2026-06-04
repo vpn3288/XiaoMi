@@ -1,6 +1,6 @@
 #!/bin/sh
 
-INSTALL_DIR="${INSTALL_DIR:-$(CDPATH= cd "$(dirname "$0")/../../.." && pwd)}"
+INSTALL_DIR="${INSTALL_DIR:-$(unset CDPATH; cd "$(dirname "$0")/../../.." && pwd)}"
 BASE="$INSTALL_DIR/panel/modules/sidegw"
 CONF="$BASE/config"
 ADMIN_TOKEN_FILE="$BASE/admin.token"
@@ -212,6 +212,7 @@ clean_cidr() {
     bits="${v#*/}"
     oldifs="$IFS"
     IFS=.
+    # shellcheck disable=SC2086
     set -- $ip
     IFS="$oldifs"
     [ "$#" -eq 4 ] &&
@@ -274,6 +275,7 @@ remove_entries_from_config_file() {
     SIDE_MACS=""
     DIRECT_IPS=""
     DIRECT_MACS=""
+    # shellcheck source=/dev/null
     . "$target" 2>/dev/null || return 0
     [ "$MODE" = "all" ] || MODE="list"
     SIDE_IPS="$(filter_words "${SIDE_IPS:-}" "$remove_ips")"
@@ -351,8 +353,10 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 MSG="面板不提供仅应用入口。请使用“应用并预检，失败自动回滚”。"
                 ;;
             test)
-                if write_config "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"; then
-                    MSG="$(SIDEGW_LOCK_HELD=1 "$BASE/test.sh" 2>&1)"
+                candidate_conf="$BASE/config.candidate.$$"
+                if write_config_file "$candidate_conf" "$ENABLED" "$MODE" "$GATEWAY" "$LAN_CIDR" "$SIDE_IPS" "$SIDE_MACS" "$DIRECT_IPS" "$DIRECT_MACS"; then
+                    MSG="$(SIDEGW_LOCK_HELD=1 SIDEGW_CONFIG="$candidate_conf" "$BASE/test.sh" 2>&1)"
+                    rm -f "$candidate_conf"
                 else
                     MSG="配置写入失败，未执行应用预检。请检查安装目录是否可写。"
                 fi
@@ -388,6 +392,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 if [ -z "$REMOVE_IPS" ] && [ -z "$REMOVE_MACS" ]; then
                     MSG="没有填写要删除的 IP 或 MAC。"
                 else
+                    # shellcheck source=/dev/null
                     . "$CONF"
                     ENABLED="${ENABLED:-0}"
                     MODE="${MODE:-list}"
@@ -458,6 +463,7 @@ fi
 MSG_SAFE="$(printf '%s' "$MSG" | html_escape)"
 
 if [ "$VIEW_AUTH" = "1" ] && [ -f "$CONF" ]; then
+    # shellcheck source=/dev/null
     . "$CONF"
 fi
 ENABLED="${ENABLED:-0}"

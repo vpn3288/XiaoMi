@@ -1,7 +1,8 @@
 #!/bin/sh
 set -u
 
-SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(unset CDPATH; cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/common.sh
 . "$SCRIPT_DIR/common.sh"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
@@ -36,11 +37,72 @@ kill_toolbox_uhttpd() {
     done
 }
 
+fallback_rule_del_recorded() {
+    state_file="$1"
+    [ -f "$state_file" ] || return 0
+    while IFS= read -r rule_args; do
+        [ -n "$rule_args" ] || continue
+        # shellcheck disable=SC2086
+        set -- $rule_args
+        while ip rule del "$@" 2>/dev/null; do :; done
+    done < "$state_file"
+}
+
+fallback_rule_del_pref_range() {
+    ip rule 2>/dev/null | while IFS= read -r line; do
+        pref="${line%%:*}"
+        echo "$pref" | grep -Eq '^[0-9]+$' || continue
+        [ "$pref" -ge 10000 ] && [ "$pref" -le 10299 ] || continue
+        case "$line" in
+            *" lookup 100"*|*" table 100"*|*"fwmark 0x64"*|*"fwmark 0x65"*)
+                while ip rule del pref "$pref" 2>/dev/null; do :; done
+                ;;
+        esac
+    done
+}
+
+fallback_iptables_cleanup() {
+    cleanup_failed=0
+    while iptables -t mangle -D PREROUTING -i br-lan -j SIDEGW 2>/dev/null; do :; done
+    while iptables -D FORWARD -i br-lan -o br-lan -j SIDEGW_FWD 2>/dev/null; do :; done
+    while iptables -t nat -D PREROUTING -i br-lan -j SIDEGW_DNS 2>/dev/null; do :; done
+    while iptables -t nat -D POSTROUTING -o br-lan -j SIDEGW_DNS_POST 2>/dev/null; do :; done
+
+    if iptables -t mangle -L SIDEGW >/dev/null 2>&1; then
+        iptables -t mangle -F SIDEGW 2>/dev/null || cleanup_failed=1
+        iptables -t mangle -X SIDEGW 2>/dev/null || cleanup_failed=1
+    fi
+    if iptables -L SIDEGW_FWD >/dev/null 2>&1; then
+        iptables -F SIDEGW_FWD 2>/dev/null || cleanup_failed=1
+        iptables -X SIDEGW_FWD 2>/dev/null || cleanup_failed=1
+    fi
+    if iptables -t nat -L SIDEGW_DNS >/dev/null 2>&1; then
+        iptables -t nat -F SIDEGW_DNS 2>/dev/null || cleanup_failed=1
+        iptables -t nat -X SIDEGW_DNS 2>/dev/null || cleanup_failed=1
+    fi
+    if iptables -t nat -L SIDEGW_DNS_POST >/dev/null 2>&1; then
+        iptables -t nat -F SIDEGW_DNS_POST 2>/dev/null || cleanup_failed=1
+        iptables -t nat -X SIDEGW_DNS_POST 2>/dev/null || cleanup_failed=1
+    fi
+    [ "$cleanup_failed" = "0" ]
+}
+
+fallback_sidegw_cleanup() {
+    command -v ip >/dev/null 2>&1 || return 1
+    command -v iptables >/dev/null 2>&1 || return 1
+    fallback_rule_del_recorded "$INSTALL_DIR/panel/modules/sidegw/rules.state"
+    fallback_rule_del_pref_range
+    ip route flush table 100 2>/dev/null || true
+    fallback_iptables_cleanup || return 1
+    ip route flush cache 2>/dev/null || true
+}
+
 keep_sidegw_last_good="/tmp/xiaomi-toolbox-uninstall-last-good.$$"
 keep_admin_token="/tmp/xiaomi-toolbox-uninstall-admin-token.$$"
+cron_tmp="/tmp/xiaomi-toolbox-cron.$$"
 
 cleanup_temp() {
-    rm -f "$keep_sidegw_last_good" "$keep_admin_token"
+    rm -f "$keep_sidegw_last_good" "$keep_admin_token" "$cron_tmp"
 }
 trap cleanup_temp EXIT
 
@@ -65,6 +127,9 @@ fi
 
 if [ -x "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" ]; then
     "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" || die "rollback failed; abort uninstall to keep recovery tools installed"
+else
+    log "rollback.sh missing or not executable; running built-in fallback sidegw cleanup"
+    fallback_sidegw_cleanup || die "fallback sidegw cleanup failed; abort uninstall to keep recovery tools installed"
 fi
 
 kill_toolbox_uhttpd
@@ -72,13 +137,14 @@ rm -f /var/run/xiaomi-toolbox.pid
 
 if [ -f /etc/crontabs/root ]; then
     backup_file /etc/crontabs/root
-    grep -v "$CRON_MARK" /etc/crontabs/root > /tmp/xiaomi-toolbox-cron || true
-    cat /tmp/xiaomi-toolbox-cron > /etc/crontabs/root
+    grep -v "$CRON_MARK" /etc/crontabs/root > "$cron_tmp" || true
+    cat "$cron_tmp" > /etc/crontabs/root
+    rm -f "$cron_tmp"
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 fi
 
 backup_file /etc/config/firewall
-uci -q delete firewall.$FIREWALL_SECTION
+uci -q delete "firewall.$FIREWALL_SECTION"
 uci commit firewall >/dev/null 2>&1 || true
 
 if [ "$KEEP_CONFIG" = "0" ]; then

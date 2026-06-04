@@ -1,7 +1,8 @@
 #!/bin/sh
 set -u
 
-SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(unset CDPATH; cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/common.sh
 . "$SCRIPT_DIR/common.sh"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
@@ -116,6 +117,7 @@ preflight() {
     [ -d "$SCRIPT_DIR/../panel/www" ] || die "source panel/www missing"
     [ -d "$SCRIPT_DIR/../panel/modules/sidegw" ] || die "source sidegw module missing"
     [ -f "$SCRIPT_DIR/../panel/www/cgi-bin/sidegw.cgi" ] || die "source sidegw CGI missing"
+    [ -f "$SCRIPT_DIR/../panel/www/cgi-bin/api.cgi" ] || die "source API CGI missing"
     [ -f "$SCRIPT_DIR/../panel/modules/sidegw/apply.sh" ] || die "source sidegw apply script missing"
 }
 
@@ -185,15 +187,6 @@ cleanup_temp() {
 }
 
 restore_install_failure() {
-    [ "$RESTORE_ON_FAIL" = "1" ] || return 0
-    if [ -n "$panel_www_backup" ] && [ -d "$panel_www_backup" ]; then
-        rm -rf "$INSTALL_DIR/panel/www" 2>/dev/null || true
-        mv "$panel_www_backup" "$INSTALL_DIR/panel/www" 2>/dev/null || true
-    fi
-    if [ -n "$sidegw_backup" ] && [ -d "$sidegw_backup" ]; then
-        rm -rf "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
-        mv "$sidegw_backup" "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
-    fi
     if [ "$AUTOSTART_TOUCHED" = "1" ]; then
         if [ "$CRON_EXISTED" = "1" ] && [ -f "$keep_cron_root" ]; then
             cat "$keep_cron_root" > /etc/crontabs/root 2>/dev/null || true
@@ -203,16 +196,28 @@ restore_install_failure() {
         if [ "$FIREWALL_EXISTED" = "1" ] && [ -f "$keep_firewall_config" ]; then
             cat "$keep_firewall_config" > /etc/config/firewall 2>/dev/null || true
             uci commit firewall >/dev/null 2>&1 || true
+        elif [ "$FIREWALL_EXISTED" = "0" ]; then
+            uci -q delete "firewall.$FIREWALL_SECTION" 2>/dev/null || true
+            uci commit firewall >/dev/null 2>&1 || true
         fi
+    fi
+    [ "$RESTORE_ON_FAIL" = "1" ] || return 0
+    if [ -n "$panel_www_backup" ] && [ -d "$panel_www_backup" ]; then
+        rm -rf "$INSTALL_DIR/panel/www" 2>/dev/null || true
+        mv "$panel_www_backup" "$INSTALL_DIR/panel/www" 2>/dev/null || true
+    fi
+    if [ -n "$sidegw_backup" ] && [ -d "$sidegw_backup" ]; then
+        rm -rf "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
+        mv "$sidegw_backup" "$INSTALL_DIR/panel/modules/sidegw" 2>/dev/null || true
     fi
 }
 
 on_exit() {
     status="$?"
-    cleanup_temp
     if [ "$status" -ne 0 ]; then
         restore_install_failure
     fi
+    cleanup_temp
 }
 trap on_exit EXIT
 
@@ -289,6 +294,7 @@ chmod +x "$INSTALL_DIR/panel/www/cgi-bin/"*.cgi 2>/dev/null || true
 chmod +x "$INSTALL_DIR/panel/modules/sidegw/"*.sh 2>/dev/null || true
 [ -s "$INSTALL_DIR/panel/www/index.html" ] || die "panel index missing after copy"
 [ -x "$INSTALL_DIR/panel/www/cgi-bin/sidegw.cgi" ] || die "panel cgi missing or not executable after copy"
+[ -x "$INSTALL_DIR/panel/www/cgi-bin/api.cgi" ] || die "api cgi missing or not executable after copy"
 [ -x "$INSTALL_DIR/panel/modules/sidegw/apply.sh" ] || die "sidegw apply script missing or not executable after copy"
 [ -x "$INSTALL_DIR/panel/modules/sidegw/test.sh" ] || die "sidegw test script missing or not executable after copy"
 [ -x "$INSTALL_DIR/panel/modules/sidegw/rollback.sh" ] || die "sidegw rollback script missing or not executable after copy"
@@ -378,7 +384,12 @@ elif [ -f "\$PENDING_GOOD" ] || [ -f "\$PENDING_UNTIL" ]; then
 elif [ -f "\$SIDEGW_BASE/config.last_good" ] && sidegw_config_enabled; then
     SIDEGW_CONFIG="\$SIDEGW_BASE/config.last_good" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
 elif [ -x "\$SIDEGW_BASE/apply.sh" ]; then
-    SIDEGW_CONFIG="\$SIDEGW_BASE/config" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+    if sidegw_config_enabled; then
+        echo "refusing to apply unverified enabled sidegw config" >/tmp/xiaomi-toolbox-sidegw.log
+        SIDEGW_CONFIG="\$SIDEGW_BASE/config.default" "\$SIDEGW_BASE/apply.sh" >>/tmp/xiaomi-toolbox-sidegw.log 2>&1
+    else
+        SIDEGW_CONFIG="\$SIDEGW_BASE/config" "\$SIDEGW_BASE/apply.sh" >/tmp/xiaomi-toolbox-sidegw.log 2>&1
+    fi
 fi
 
 running_pid="\$(find_toolbox_uhttpd)"
